@@ -29,7 +29,7 @@ def fetch_json(url: str) -> dict | None:
             with urlopen(request, timeout=8) as response:
                 return json.loads(response.read().decode("utf-8"))
         except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as error:
-            if attempt == 2:
+            if attempt == 1:
                 print(f"WARN {url}: {error}", file=sys.stderr)
             time.sleep(1.0 * (attempt + 1))
     return None
@@ -57,27 +57,31 @@ def latest_nav(code: str) -> dict:
     }
 
 
-def etf_quote(code: str) -> dict:
+def etf_quotes(codes: list[str]) -> dict[str, dict]:
+    """Fetch all ETF quotes in one Eastmoney request to reduce timeout risk."""
+    secids = ",".join(exchange_secid(code) for code in codes)
     payload = fetch_json(
-        "https://push2.eastmoney.com/api/qt/stock/get?"
-        f"secid={exchange_secid(code)}&fields=f43,f57,f58,f60,f124"
+        "https://push2.eastmoney.com/api/qt/ulist.np/get?"
+        f"fltt=2&invt=2&fields=f2,f3,f12,f14,f18,f124&secids={secids}"
     )
-    data = (payload or {}).get("data") or {}
-    price = data.get("f43")
-    previous_close = data.get("f60")
+    rows = ((payload or {}).get("data") or {}).get("diff") or []
     return {
-        # Eastmoney quote values are scaled by 100 for these fields.
-        "marketPrice": round(price / 100, 4) if isinstance(price, (int, float)) and price else None,
-        "previousClose": round(previous_close / 100, 4) if isinstance(previous_close, (int, float)) and previous_close else None,
-        "quoteName": data.get("f58"),
-        "quoteTimestamp": data.get("f124"),
+        str(row["f12"]): {
+            "marketPrice": row.get("f2"),
+            "marketChange": row.get("f3"),
+            "previousClose": row.get("f18"),
+            "quoteName": row.get("f14"),
+            "quoteTimestamp": row.get("f124"),
+        }
+        for row in rows
+        if row.get("f12")
     }
 
 
-def refresh_fund(fund: dict) -> dict:
+def refresh_fund(fund: dict, quotes: dict[str, dict]) -> dict:
     record = {**fund, **latest_nav(fund["code"])}
     if fund["type"] == "场内ETF":
-        record.update(etf_quote(fund["code"]))
+        record.update(quotes.get(fund["code"], {}))
         # IOPV is deliberately not inferred from a previous NAV.
         record["iopv"] = None
         record["premium"] = None
@@ -87,9 +91,11 @@ def refresh_fund(fund: dict) -> dict:
 
 def main() -> None:
     universe = json.loads(UNIVERSE.read_text(encoding="utf-8"))
+    etf_codes = [fund["code"] for fund in universe if fund["type"] == "场内ETF"]
+    quotes = etf_quotes(etf_codes)
     print(f"Refreshing {len(universe)} funds with six bounded workers...")
     with ThreadPoolExecutor(max_workers=6) as executor:
-        refreshed = list(executor.map(refresh_fund, universe))
+        refreshed = list(executor.map(lambda fund: refresh_fund(fund, quotes), universe))
 
     snapshot = {
         "generatedAt": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
