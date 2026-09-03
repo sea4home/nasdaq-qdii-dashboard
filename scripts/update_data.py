@@ -141,10 +141,16 @@ def refresh_fund(fund: dict, quotes: dict[str, dict], performances: dict[str, di
     if fund["type"] == "场内ETF":
         record.update(quotes.get(fund["code"], {}))
         record.update(performances.get(fund["code"], {}))
-        # IOPV is deliberately not inferred from a previous NAV.
+        # This is disclosed-NAV premium, not an intraday IOPV premium.
         record["iopv"] = None
-        record["premium"] = None
-        record["premiumStatus"] = "未接入实时 IOPV，暂不计算溢价"
+        try:
+            nav = float(record["nav"])
+            price = float(record["marketPrice"])
+            record["premium"] = round((price / nav - 1) * 100, 2)
+            record["premiumStatus"] = "最新市价相对最新披露单位净值"
+        except (KeyError, TypeError, ValueError, ZeroDivisionError):
+            record["premium"] = None
+            record["premiumStatus"] = "缺少最新市价或单位净值，暂不可计算"
     return record
 
 
@@ -168,7 +174,7 @@ def main() -> None:
         },
         "notes": [
             "场外净值通常按基金公司披露频率更新，不等同实时估值。",
-            "场内 ETF 溢价必须使用同一时点 IOPV 计算；未接入时显示为空。",
+            "场内 ETF 溢价率按最新市价相对最新披露单位净值计算，不等同盘中 IOPV 溢价。",
             "申购及赎回状态以基金公司最新公告为准。",
         ],
         "funds": refreshed,

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-03T18:03:42+08:00",
+  "generatedAt": "2026-09-03T19:09:03+08:00",
   "sources": {
     "nav": "天天基金 / 东方财富历史净值接口",
     "etfQuote": "东方财富行情接口",
@@ -8,7 +8,7 @@
   },
   "notes": [
     "场外净值通常按基金公司披露频率更新，不等同实时估值。",
-    "场内 ETF 溢价必须使用同一时点 IOPV 计算；未接入时显示为空。",
+    "场内 ETF 溢价率按最新市价相对最新披露单位净值计算，不等同盘中 IOPV 溢价。",
     "申购及赎回状态以基金公司最新公告为准。"
   ],
   "funds": [
@@ -38,8 +38,8 @@
         "basis": "单位净值累计收益"
       },
       "iopv": null,
-      "premium": null,
-      "premiumStatus": "未接入实时 IOPV，暂不计算溢价"
+      "premium": 24.24,
+      "premiumStatus": "最新市价相对最新披露单位净值"
     },
     {
       "name": "广发纳指ETF",
@@ -67,8 +67,8 @@
         "basis": "单位净值累计收益"
       },
       "iopv": null,
-      "premium": null,
-      "premiumStatus": "未接入实时 IOPV，暂不计算溢价"
+      "premium": 11.19,
+      "premiumStatus": "最新市价相对最新披露单位净值"
     },
     {
       "name": "国泰纳指ETF",
@@ -96,8 +96,8 @@
         "basis": "单位净值累计收益"
       },
       "iopv": null,
-      "premium": null,
-      "premiumStatus": "未接入实时 IOPV，暂不计算溢价"
+      "premium": 11.74,
+      "premiumStatus": "最新市价相对最新披露单位净值"
     },
     {
       "name": "华夏纳斯达克ETF",
@@ -118,15 +118,15 @@
       "quoteName": "纳斯达克ETF华夏",
       "quoteTimestamp": 1788423092,
       "performance": {
-        "asOf": "2026-08-31",
-        "oneYear": 16.64,
-        "yearToDate": 10.45,
-        "threeYear": 72.13,
+        "asOf": "2026-09-01",
+        "oneYear": 17.56,
+        "yearToDate": 10.69,
+        "threeYear": 72.51,
         "basis": "单位净值累计收益"
       },
       "iopv": null,
-      "premium": null,
-      "premiumStatus": "未接入实时 IOPV，暂不计算溢价"
+      "premium": 8.87,
+      "premiumStatus": "最新市价相对最新披露单位净值"
     },
     {
       "name": "华安纳斯达克ETF",
@@ -136,9 +136,9 @@
       "managementFee": "0.60%",
       "custodyFee": "0.20%",
       "totalFee": "0.80%",
-      "nav": "2.2319",
-      "navDate": "2026-09-01",
-      "navChange": "-1.31",
+      "nav": "2.2375",
+      "navDate": "2026-09-02",
+      "navChange": "0.25",
       "purchaseStatus": "场内买入",
       "redemptionStatus": "场内卖出",
       "marketPrice": 2.427,
@@ -147,15 +147,15 @@
       "quoteName": "纳斯达克ETF华安",
       "quoteTimestamp": 1788420867,
       "performance": {
-        "asOf": "2026-08-31",
-        "oneYear": 18.08,
-        "yearToDate": 10.88,
-        "threeYear": 73.58,
+        "asOf": "2026-09-01",
+        "oneYear": 19.29,
+        "yearToDate": 11.16,
+        "threeYear": 74.02,
         "basis": "单位净值累计收益"
       },
       "iopv": null,
-      "premium": null,
-      "premiumStatus": "未接入实时 IOPV，暂不计算溢价"
+      "premium": 8.47,
+      "premiumStatus": "最新市价相对最新披露单位净值"
     },
     {
       "name": "嘉实纳指ETF",
@@ -183,8 +183,8 @@
         "basis": "单位净值累计收益"
       },
       "iopv": null,
-      "premium": null,
-      "premiumStatus": "未接入实时 IOPV，暂不计算溢价"
+      "premium": 13.05,
+      "premiumStatus": "最新市价相对最新披露单位净值"
     },
     {
       "name": "易方达纳指ETF",
@@ -212,8 +212,8 @@
         "basis": "单位净值累计收益"
       },
       "iopv": null,
-      "premium": null,
-      "premiumStatus": "未接入实时 IOPV，暂不计算溢价"
+      "premium": 9.82,
+      "premiumStatus": "最新市价相对最新披露单位净值"
     },
     {
       "name": "招商纳斯达克100ETF",
@@ -223,9 +223,9 @@
       "managementFee": "0.50%",
       "custodyFee": "0.15%",
       "totalFee": "0.65%",
-      "nav": "2.1228",
-      "navDate": "2026-09-01",
-      "navChange": "-1.31",
+      "nav": "2.1282",
+      "navDate": "2026-09-02",
+      "navChange": "0.25",
       "purchaseStatus": "场内买入",
       "redemptionStatus": "场内卖出",
       "marketPrice": 2.316,
@@ -241,8 +241,8 @@
         "basis": "单位净值累计收益"
       },
       "iopv": null,
-      "premium": null,
-      "premiumStatus": "未接入实时 IOPV，暂不计算溢价"
+      "premium": 8.82,
+      "premiumStatus": "最新市价相对最新披露单位净值"
     },
     {
       "name": "博时纳指100ETF",
@@ -263,15 +263,15 @@
       "quoteName": "纳指100ETF博时",
       "quoteTimestamp": 1788423103,
       "performance": {
-        "asOf": "2026-08-31",
-        "oneYear": 18.18,
-        "yearToDate": 10.93,
-        "threeYear": 77.07,
+        "asOf": "2026-09-01",
+        "oneYear": 19.39,
+        "yearToDate": 11.21,
+        "threeYear": 77.52,
         "basis": "单位净值累计收益"
       },
       "iopv": null,
-      "premium": null,
-      "premiumStatus": "未接入实时 IOPV，暂不计算溢价"
+      "premium": 8.34,
+      "premiumStatus": "最新市价相对最新披露单位净值"
     },
     {
       "name": "汇添富纳指ETF",
@@ -281,9 +281,9 @@
       "managementFee": "0.50%",
       "custodyFee": "0.15%",
       "totalFee": "0.65%",
-      "nav": "2.1476",
-      "navDate": "2026-09-01",
-      "navChange": "-1.32",
+      "nav": "2.1531",
+      "navDate": "2026-09-02",
+      "navChange": "0.26",
       "purchaseStatus": "场内买入",
       "redemptionStatus": "场内卖出",
       "marketPrice": 2.332,
@@ -299,8 +299,8 @@
         "basis": "单位净值累计收益"
       },
       "iopv": null,
-      "premium": null,
-      "premiumStatus": "未接入实时 IOPV，暂不计算溢价"
+      "premium": 8.31,
+      "premiumStatus": "最新市价相对最新披露单位净值"
     },
     {
       "name": "富国纳斯达克100ETF",
@@ -310,9 +310,9 @@
       "managementFee": "0.50%",
       "custodyFee": "0.10%",
       "totalFee": "0.60%",
-      "nav": "1.8714",
-      "navDate": "2026-09-01",
-      "navChange": "-1.31",
+      "nav": "1.8761",
+      "navDate": "2026-09-02",
+      "navChange": "0.25",
       "purchaseStatus": "场内买入",
       "redemptionStatus": "场内卖出",
       "marketPrice": 2.04,
@@ -321,15 +321,15 @@
       "quoteName": "纳指ETF富国",
       "quoteTimestamp": 1788423106,
       "performance": {
-        "asOf": "2026-08-31",
-        "oneYear": 18.26,
-        "yearToDate": 10.94,
+        "asOf": "2026-09-01",
+        "oneYear": 19.47,
+        "yearToDate": 11.22,
         "threeYear": null,
         "basis": "单位净值累计收益"
       },
       "iopv": null,
-      "premium": null,
-      "premiumStatus": "未接入实时 IOPV，暂不计算溢价"
+      "premium": 8.74,
+      "premiumStatus": "最新市价相对最新披露单位净值"
     },
     {
       "name": "广发纳指ETF联接A",
@@ -353,9 +353,9 @@
       "managementFee": "0.80%",
       "custodyFee": "0.20%",
       "totalFee": "1.00%+销售服务费",
-      "nav": "7.9075",
-      "navDate": "2026-09-01",
-      "navChange": "-1.32",
+      "nav": "7.9272",
+      "navDate": "2026-09-02",
+      "navChange": "0.25",
       "purchaseStatus": "限制大额申购",
       "redemptionStatus": "开放赎回"
     },
@@ -367,10 +367,10 @@
       "managementFee": "0.50%",
       "custodyFee": "0.10%",
       "totalFee": "0.62%",
-      "nav": "2.0079",
-      "navDate": "2026-09-01",
-      "navChange": "-1.25",
-      "purchaseStatus": "暂停申购",
+      "nav": "2.0128",
+      "navDate": "2026-09-02",
+      "navChange": "0.24",
+      "purchaseStatus": "限制大额申购",
       "redemptionStatus": "开放赎回"
     },
     {
@@ -381,10 +381,10 @@
       "managementFee": "0.50%",
       "custodyFee": "0.10%",
       "totalFee": "0.82%",
-      "nav": "1.9910",
-      "navDate": "2026-09-01",
-      "navChange": "-1.25",
-      "purchaseStatus": "暂停申购",
+      "nav": "1.9958",
+      "navDate": "2026-09-02",
+      "navChange": "0.24",
+      "purchaseStatus": "限制大额申购",
       "redemptionStatus": "开放赎回"
     },
     {
@@ -423,9 +423,9 @@
       "managementFee": "0.60%",
       "custodyFee": "0.20%",
       "totalFee": "1.04%",
-      "nav": "8.0821",
-      "navDate": "2026-09-01",
-      "navChange": "-1.33",
+      "nav": "8.1014",
+      "navDate": "2026-09-02",
+      "navChange": "0.24",
       "purchaseStatus": "限制大额申购",
       "redemptionStatus": "开放赎回"
     },
@@ -437,9 +437,9 @@
       "managementFee": "0.60%",
       "custodyFee": "0.20%",
       "totalFee": "1.24%",
-      "nav": "7.9150",
-      "navDate": "2026-09-01",
-      "navChange": "-1.33",
+      "nav": "7.9340",
+      "navDate": "2026-09-02",
+      "navChange": "0.24",
       "purchaseStatus": "限制大额申购",
       "redemptionStatus": "开放赎回"
     },
@@ -507,9 +507,9 @@
       "managementFee": "-",
       "custodyFee": "-",
       "totalFee": "1.18%",
-      "nav": "6.2190",
-      "navDate": "2026-09-01",
-      "navChange": "-1.31",
+      "nav": "6.2317",
+      "navDate": "2026-09-02",
+      "navChange": "0.20",
       "purchaseStatus": "限制大额申购",
       "redemptionStatus": "开放赎回"
     },
@@ -521,9 +521,9 @@
       "managementFee": "-",
       "custodyFee": "-",
       "totalFee": "-",
-      "nav": "6.1609",
-      "navDate": "2026-09-01",
-      "navChange": "-1.32",
+      "nav": "6.1735",
+      "navDate": "2026-09-02",
+      "navChange": "0.20",
       "purchaseStatus": "限制大额申购",
       "redemptionStatus": "开放赎回"
     },
@@ -619,9 +619,9 @@
       "managementFee": "0.50%",
       "custodyFee": "0.15%",
       "totalFee": "-",
-      "nav": "1.6229",
-      "navDate": "2026-09-01",
-      "navChange": "-1.25",
+      "nav": "1.6269",
+      "navDate": "2026-09-02",
+      "navChange": "0.25",
       "purchaseStatus": "限制大额申购",
       "redemptionStatus": "开放赎回"
     },
@@ -633,9 +633,9 @@
       "managementFee": "0.50%",
       "custodyFee": "0.15%",
       "totalFee": "1.36%",
-      "nav": "1.6034",
-      "navDate": "2026-09-01",
-      "navChange": "-1.25",
+      "nav": "1.6073",
+      "navDate": "2026-09-02",
+      "navChange": "0.24",
       "purchaseStatus": "限制大额申购",
       "redemptionStatus": "开放赎回"
     }
