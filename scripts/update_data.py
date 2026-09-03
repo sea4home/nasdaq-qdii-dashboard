@@ -77,11 +77,11 @@ def all_fund_statuses() -> dict[str, dict]:
         "https://fund.eastmoney.com/Data/Fund_JJJZ_Data.aspx?t=8&page=1,50000&js=reData&sort=fcode,asc",
         encoding="gb18030",
     )
-    match = re.search(r"var reData=(\{.*\});?$", source or "", re.S)
+    match = re.search(r"datas:(\[.*\]),record:", source or "", re.S)
     if not match:
         return {}
     try:
-        rows = json.loads(match.group(1)).get("datas", [])
+        rows = json.loads(match.group(1))
     except json.JSONDecodeError:
         return {}
     expected = {fund["code"] for fund in json.loads(UNIVERSE.read_text(encoding="utf-8"))}

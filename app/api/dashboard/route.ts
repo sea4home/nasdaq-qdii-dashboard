@@ -1,6 +1,6 @@
 import universe from '@/data/fund_universe.json';
 
-type MarketQuote = { marketPrice?: number; marketChange?: number; previousClose?: number; quoteTimestamp?: string; iopv?: number };
+type MarketQuote = { marketPrice?: number; marketChange?: number; previousClose?: number; quoteTimestamp?: string };
 type FundStatus = { nav?: string; navDate?: string; purchaseStatus?: string; dailyLimit?: string };
 
 const etfCodes = universe.filter((fund) => fund.type === '场内ETF').map((fund) => fund.code);
@@ -23,16 +23,11 @@ async function tencentQuotes(): Promise<Record<string, MarketQuote>> {
     if (!match) continue;
     const values = match[3].split('~');
     const price = numberAt(values, 3);
-    const iopv = numberAt(values, 85);
-    // The IOPV quote must be plausible relative to the traded ETF price. If it is not,
-    // leave the premium empty rather than silently substituting the disclosed NAV.
-    const validIopv = price && iopv && Math.abs(price / iopv - 1) < 0.25 ? iopv : undefined;
     quotes[match[2]] = {
       marketPrice: price,
       previousClose: numberAt(values, 4),
       marketChange: Number.isFinite(Number(values[32])) ? Number(values[32]) : undefined,
       quoteTimestamp: values[30] || undefined,
-      iopv: validIopv,
     };
   }
   return quotes;
@@ -63,13 +58,13 @@ function formatLimit(value: string) {
 async function eastmoneyFundStatus(): Promise<Record<string, FundStatus>> {
   const response = await fetch('https://fund.eastmoney.com/Data/Fund_JJJZ_Data.aspx?t=8&page=1,50000&js=reData&sort=fcode,asc', { headers, cache: 'no-store' });
   if (!response.ok) throw new Error(`Eastmoney status ${response.status}`);
-  const text = new TextDecoder('gb18030').decode(await response.arrayBuffer());
-  const match = text.match(/var\s+reData\s*=\s*(\{.*\});?$/s);
+  const text = await response.text();
+  const match = text.match(/datas:(\[.*\]),record:/s);
   if (!match) throw new Error('Eastmoney status payload changed');
-  const payload = JSON.parse(match[1]) as { datas?: string[][] };
+  const rows = JSON.parse(match[1]) as string[][];
   const expectedCodes = new Set(universe.map((fund) => fund.code));
   const status: Record<string, FundStatus> = {};
-  for (const row of payload.datas ?? []) {
+  for (const row of rows) {
     if (!expectedCodes.has(row[0])) continue;
     status[row[0]] = {
       nav: row[3] || undefined,
@@ -79,6 +74,14 @@ async function eastmoneyFundStatus(): Promise<Record<string, FundStatus>> {
     };
   }
   return status;
+}
+
+async function latestNav(code: string): Promise<FundStatus> {
+  const response = await fetch(`https://api.fund.eastmoney.com/f10/lsjz?fundCode=${code}&pageIndex=1&pageSize=1`, { headers, cache: 'no-store' });
+  if (!response.ok) return {};
+  const payload = await response.json() as { Data?: { LSJZList?: Array<{ DWJZ?: string; FSRQ?: string; SGZT?: string }> } };
+  const row = payload.Data?.LSJZList?.[0];
+  return row ? { nav: row.DWJZ, navDate: row.FSRQ, purchaseStatus: row.SGZT } : {};
 }
 
 async function mapWithConcurrency<T, R>(items: T[], worker: (item: T) => Promise<R>, limit = 5) {
@@ -130,20 +133,25 @@ export async function GET() {
   }
   const statuses = statusResult.status === 'fulfilled' ? statusResult.value : {};
   if (statusResult.status === 'fulfilled') sources.push('天天基金申购状态与净值接口');
+  const navResults = await mapWithConcurrency(universe.map((fund) => fund.code), latestNav);
+  const navs = Object.fromEntries(universe.map((fund, index) => [fund.code, navResults[index]]));
+  if (navResults.some((item) => item.nav)) sources.push('东方财富基金历史净值接口');
   const performances = await mapWithConcurrency(etfCodes, performance);
   if (performances.some(Boolean)) sources.push('天天基金单位净值走势接口（收益计算）');
 
   const output = universe.map((fund) => {
     const quote = quotes[fund.code];
-    const premium = quote?.marketPrice && quote.iopv ? Number((((quote.marketPrice - quote.iopv) / quote.iopv) * 100).toFixed(2)) : null;
+    const disclosedNav = navs[fund.code]?.nav;
+    const premium = quote?.marketPrice && disclosedNav ? Number((((quote.marketPrice - Number(disclosedNav)) / Number(disclosedNav)) * 100).toFixed(2)) : null;
     return {
       ...fund,
+      ...navs[fund.code],
       ...statuses[fund.code],
       ...quote,
       premium,
-      premiumStatus: quote?.iopv ? '按实时 IOPV 计算' : 'IOPV 暂不可用，未计算溢价率',
+      premiumStatus: disclosedNav ? '最新市价相对最新披露单位净值' : '最新披露单位净值暂不可用，未计算溢价率',
       performance: fund.type === '场内ETF' ? performances[etfCodes.indexOf(fund.code)] : undefined,
     };
   });
-  return Response.json({ generatedAt: new Date().toISOString(), mode: 'live', sources, funds: output, notes: ['溢价率 =（最新价 - IOPV）/ IOPV；缺少 IOPV 时不展示数值。', '申购状态、单日限额、净值和净值日期随页面刷新请求上游数据。'] }, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
+  return Response.json({ generatedAt: new Date().toISOString(), mode: 'live', sources, funds: output, notes: ['净值溢价率 =（最新价 - 最新披露单位净值）/ 最新披露单位净值。', '申购状态、单日限额、净值和净值日期随页面刷新请求上游数据。'] }, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
 }
