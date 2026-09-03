@@ -97,12 +97,12 @@ export default function Home() {
                 <thead className="bg-[#eaf0f5] text-xs text-slate-500">
                   <tr>
                     {[
+                      '基金名称 / 代码',
                       '涨跌幅',
                       '净值溢价率',
                       '近一年收益',
                       '今年收益',
                       '近3年收益',
-                      '基金名称 / 代码',
                       '昨收',
                       '最新价',
                       '最新披露单位净值',
@@ -120,17 +120,17 @@ export default function Home() {
                 <tbody>
                   {etfs.map((f) => (
                     <tr key={f.code} className="border-t border-slate-100">
-                      <Change value={f.marketChange} />
-                      <Premium value={f.premium} />
-                      <Return value={f.performance?.oneYear} />
-                      <Return value={f.performance?.yearToDate} />
-                      <Return value={f.performance?.threeYear} />
-                      <td className="px-5 py-3.5">
+                      <td className="sticky left-0 z-10 bg-white px-5 py-3.5 shadow-[4px_0_8px_-6px_rgba(16,42,67,.28)]">
                         <p className="font-medium text-slate-800">{f.name}</p>
                         <p className="font-mono text-xs text-slate-400">
                           {f.code}
                         </p>
                       </td>
+                      <Change value={f.marketChange} />
+                      <Premium value={f.premium} />
+                      <Return value={f.performance?.oneYear} />
+                      <Return value={f.performance?.yearToDate} />
+                      <Return value={f.performance?.threeYear} />
                       <Num value={f.previousClose} />
                       <Num value={f.marketPrice} strong />
                       <td className="px-5 py-3.5 font-mono text-slate-600">
@@ -223,7 +223,7 @@ export default function Home() {
 function Num({ value, strong = false }: { value?: number; strong?: boolean }) {
   return (
     <td
-      className={`px-5 py-3.5 font-mono ${strong ? 'font-medium text-[#0d4a7c]' : 'text-slate-600'}`}
+      className="px-5 py-3.5 font-mono text-slate-600"
     >
       {value === undefined ? '--' : value.toFixed(3)}
     </td>
@@ -232,7 +232,7 @@ function Num({ value, strong = false }: { value?: number; strong?: boolean }) {
 function Change({ value }: { value?: number }) {
   return (
     <td
-      className={`sticky left-0 z-10 bg-white px-5 py-3.5 font-mono shadow-[4px_0_8px_-6px_rgba(16,42,67,.28)] ${value === undefined ? 'text-slate-400' : value >= 0 ? 'text-rose-600' : 'text-emerald-700'}`}
+      className="px-5 py-3.5 font-mono text-slate-600"
     >
       {value === undefined
         ? '--'
@@ -243,7 +243,7 @@ function Change({ value }: { value?: number }) {
 function Premium({ value }: { value?: number | null }) {
   return (
     <td
-      className={`px-5 py-3.5 font-mono font-semibold ${value === undefined || value === null ? 'text-slate-400' : value >= 0 ? 'text-rose-600' : 'text-emerald-700'}`}
+      className="px-5 py-3.5 font-mono text-slate-600"
     >
       {value === undefined || value === null
         ? '--'
@@ -254,7 +254,7 @@ function Premium({ value }: { value?: number | null }) {
 function Return({ value }: { value?: number | null }) {
   return (
     <td
-      className={`px-5 py-3.5 font-mono ${value === undefined || value === null ? 'text-slate-400' : value >= 0 ? 'text-rose-600' : 'text-emerald-700'}`}
+      className="px-5 py-3.5 font-mono text-slate-600"
     >
       {value === undefined || value === null
         ? '--'
