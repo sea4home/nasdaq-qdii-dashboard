@@ -7,10 +7,11 @@ The script uses only Python's standard library and writes public/data/latest.jso
 from __future__ import annotations
 
 import json
+import re
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -29,6 +30,19 @@ def fetch_json(url: str) -> dict | None:
             with urlopen(request, timeout=8) as response:
                 return json.loads(response.read().decode("utf-8"))
         except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as error:
+            if attempt == 1:
+                print(f"WARN {url}: {error}", file=sys.stderr)
+            time.sleep(1.0 * (attempt + 1))
+    return None
+
+
+def fetch_text(url: str) -> str | None:
+    request = Request(url, headers=HEADERS)
+    for attempt in range(2):
+        try:
+            with urlopen(request, timeout=12) as response:
+                return response.read().decode("utf-8-sig")
+        except (HTTPError, URLError, TimeoutError) as error:
             if attempt == 1:
                 print(f"WARN {url}: {error}", file=sys.stderr)
             time.sleep(1.0 * (attempt + 1))
@@ -78,10 +92,55 @@ def etf_quotes(codes: list[str]) -> dict[str, dict]:
     }
 
 
-def refresh_fund(fund: dict, quotes: dict[str, dict]) -> dict:
+def shift_years(value: date, years: int) -> date:
+    try:
+        return value.replace(year=value.year - years)
+    except ValueError:
+        # February 29 maps to February 28 in a non-leap reference year.
+        return value.replace(year=value.year - years, month=2, day=28)
+
+
+def nav_performance(code: str) -> dict:
+    """Compute fund-NAV returns from Eastmoney's complete net-worth history."""
+    source = fetch_text(f"https://fund.eastmoney.com/pingzhongdata/{code}.js?v={int(time.time())}")
+    match = re.search(r"var Data_netWorthTrend\s*=\s*(\[.*?\]);", source or "", re.S)
+    if not match:
+        return {}
+    try:
+        trend = json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return {}
+
+    points = []
+    for row in trend:
+        if not isinstance(row.get("x"), (int, float)) or not isinstance(row.get("y"), (int, float)):
+            continue
+        points.append((datetime.fromtimestamp(row["x"] / 1000, timezone.utc).date(), row["y"]))
+    if not points:
+        return {}
+
+    as_of, latest = points[-1]
+
+    def return_from(target: date) -> float | None:
+        reference = next((value for point_date, value in reversed(points) if point_date <= target), None)
+        return round((latest / reference - 1) * 100, 2) if reference else None
+
+    return {
+        "performance": {
+            "asOf": as_of.isoformat(),
+            "oneYear": return_from(shift_years(as_of, 1)),
+            "yearToDate": return_from(date(as_of.year, 1, 1)),
+            "threeYear": return_from(shift_years(as_of, 3)),
+            "basis": "单位净值累计收益",
+        }
+    }
+
+
+def refresh_fund(fund: dict, quotes: dict[str, dict], performances: dict[str, dict]) -> dict:
     record = {**fund, **latest_nav(fund["code"])}
     if fund["type"] == "场内ETF":
         record.update(quotes.get(fund["code"], {}))
+        record.update(performances.get(fund["code"], {}))
         # IOPV is deliberately not inferred from a previous NAV.
         record["iopv"] = None
         record["premium"] = None
@@ -93,15 +152,18 @@ def main() -> None:
     universe = json.loads(UNIVERSE.read_text(encoding="utf-8"))
     etf_codes = [fund["code"] for fund in universe if fund["type"] == "场内ETF"]
     quotes = etf_quotes(etf_codes)
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        performances = dict(zip(etf_codes, executor.map(nav_performance, etf_codes)))
     print(f"Refreshing {len(universe)} funds with six bounded workers...")
     with ThreadPoolExecutor(max_workers=6) as executor:
-        refreshed = list(executor.map(lambda fund: refresh_fund(fund, quotes), universe))
+        refreshed = list(executor.map(lambda fund: refresh_fund(fund, quotes, performances), universe))
 
     snapshot = {
         "generatedAt": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
         "sources": {
             "nav": "天天基金 / 东方财富历史净值接口",
             "etfQuote": "东方财富行情接口",
+            "etfPerformance": "东方财富基金档案单位净值走势接口",
             "qdiiQuota": "国家外汇管理局 QDII 投资额度审批情况表（建议人工复核）",
         },
         "notes": [
