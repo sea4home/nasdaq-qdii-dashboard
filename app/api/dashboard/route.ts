@@ -63,8 +63,8 @@ function formatLimit(value: string) {
 async function eastmoneyFundStatus(): Promise<Record<string, FundStatus>> {
   const response = await fetch('https://fund.eastmoney.com/Data/Fund_JJJZ_Data.aspx?t=8&page=1,50000&js=reData&sort=fcode,asc', { headers, cache: 'no-store' });
   if (!response.ok) throw new Error(`Eastmoney status ${response.status}`);
-  const text = await response.text();
-  const match = text.match(/var reData=(\{.*\});?$/s);
+  const text = new TextDecoder('gb18030').decode(await response.arrayBuffer());
+  const match = text.match(/var\s+reData\s*=\s*(\{.*\});?$/s);
   if (!match) throw new Error('Eastmoney status payload changed');
   const payload = JSON.parse(match[1]) as { datas?: string[][] };
   const expectedCodes = new Set(universe.map((fund) => fund.code));
