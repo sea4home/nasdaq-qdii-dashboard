@@ -20,12 +20,22 @@ type Fund = (typeof universe)[number] & {
   premiumStatus?: string;
   performance?: Performance;
 };
+type Stock = {
+  symbol: string;
+  name?: string;
+  marketPrice?: number;
+  marketChange?: number;
+  previousClose?: number;
+  quoteTimestamp?: string;
+  performance?: Performance;
+};
 type Snapshot = {
   generatedAt: string | null;
   funds: Fund[];
+  stocks: Stock[];
   sources?: string[];
 };
-const initial: Snapshot = { generatedAt: null, funds: universe };
+const initial: Snapshot = { generatedAt: null, funds: universe, stocks: [] };
 const statusClass: Record<string, string> = {
   限大额: 'bg-amber-50 text-amber-700 border-amber-200',
   限制大额申购: 'bg-amber-50 text-amber-700 border-amber-200',
@@ -52,6 +62,7 @@ export default function Home() {
     .filter((f) => f.type === '场内ETF')
     .sort((a, b) => (b.premium ?? -Infinity) - (a.premium ?? -Infinity));
   const offMarket = snapshot.funds.filter((f) => f.type !== '场内ETF');
+  const stocks = [...snapshot.stocks].sort((a, b) => (b.performance?.oneYear ?? -Infinity) - (a.performance?.oneYear ?? -Infinity));
   return (
     <main className="min-h-screen bg-[#f4f7f8]">
       <header className="hero-grid text-white">
@@ -138,6 +149,50 @@ export default function Home() {
                       </td>
                       <td className="px-5 py-3.5 font-mono text-slate-600">
                         {f.navDate ?? '--'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+        <section className="mt-14">
+          <p className="section-kicker">US MEGA-CAP TECH</p>
+          <h2 className="section-title">美国大型科技巨头收益排行对比</h2>
+          <p className="mt-2 text-sm text-slate-500">
+            按近一年收益排序，价格单位为美元；收益基于历史收盘价计算。
+          </p>
+          <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[940px] text-left text-sm">
+                <thead className="bg-[#eaf0f5] text-xs text-slate-500">
+                  <tr>
+                    {['标的代码', '涨跌幅', '今年收益', '近一年收益', '近3年收益', '昨收', '最新价', '日期'].map((x, i) => (
+                      <th
+                        key={x}
+                        className={`px-5 py-3.5 font-medium ${i === 0 ? 'sticky left-0 z-20 bg-[#eaf0f5] shadow-[4px_0_8px_-6px_rgba(16,42,67,.35)]' : ''}`}
+                      >
+                        {x}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {stocks.map((stock) => (
+                    <tr key={stock.symbol} className="border-t border-slate-100">
+                      <td className="sticky left-0 z-10 bg-white px-5 py-3.5 shadow-[4px_0_8px_-6px_rgba(16,42,67,.28)]">
+                        <p className="font-medium text-slate-800">{stock.symbol}</p>
+                        <p className="text-xs text-slate-400">{stock.name ?? '--'}</p>
+                      </td>
+                      <Change value={stock.marketChange} />
+                      <Return value={stock.performance?.yearToDate} />
+                      <Return value={stock.performance?.oneYear} />
+                      <Return value={stock.performance?.threeYear} />
+                      <Num value={stock.previousClose} />
+                      <Num value={stock.marketPrice} strong />
+                      <td className="px-5 py-3.5 font-mono text-slate-600">
+                        {stock.quoteTimestamp?.slice(0, 10) ?? '--'}
                       </td>
                     </tr>
                   ))}

@@ -2,8 +2,11 @@ import universe from '@/data/fund_universe.json';
 
 type MarketQuote = { marketPrice?: number; marketChange?: number; previousClose?: number; quoteTimestamp?: string };
 type FundStatus = { nav?: string; navDate?: string; purchaseStatus?: string; dailyLimit?: string };
+type StockQuote = MarketQuote & { symbol: string; name?: string };
+type StockPerformance = { oneYear?: number | null; yearToDate?: number | null; threeYear?: number | null };
 
 const etfCodes = universe.filter((fund) => fund.type === '场内ETF').map((fund) => fund.code);
+const usStockSymbols = ['NVDA', 'MSFT', 'AAPL', 'GOOGL', 'AMZN', 'META', 'TSLA', 'SPCX', 'TSM', 'AVGO', 'AMD', 'SNDK'];
 const headers = { 'User-Agent': 'Mozilla/5.0', Referer: 'https://fund.eastmoney.com/' };
 
 function numberAt(values: string[], index: number) {
@@ -120,6 +123,60 @@ async function performance(code: string) {
   return { asOf: asOf.toISOString().slice(0, 10), oneYear: getReturn(shiftedDate(asOf, 1)), yearToDate: getReturn(new Date(asOf.getFullYear(), 0, 1)), threeYear: getReturn(shiftedDate(asOf, 3)), basis: '单位净值累计收益' };
 }
 
+async function usStockQuotes(): Promise<Record<string, StockQuote>> {
+  const response = await fetch(`https://qt.gtimg.cn/q=${usStockSymbols.map((symbol) => `us${symbol}`).join(',')}`, { headers, cache: 'no-store' });
+  if (!response.ok) throw new Error(`Tencent US quote ${response.status}`);
+  const text = new TextDecoder('gb18030').decode(await response.arrayBuffer());
+  const quotes: Record<string, StockQuote> = {};
+
+  for (const line of text.split(/\r?\n/)) {
+    const match = line.match(/v_us([A-Z]+)="(.*)"/);
+    if (!match) continue;
+    const values = match[2].split('~');
+    quotes[match[1]] = {
+      symbol: match[1],
+      name: values[1] || undefined,
+      marketPrice: numberAt(values, 3),
+      previousClose: numberAt(values, 4),
+      marketChange: Number.isFinite(Number(values[32])) ? Number(values[32]) : undefined,
+      quoteTimestamp: values[30] || undefined,
+    };
+  }
+  return quotes;
+}
+
+async function usStockPerformance(symbol: string): Promise<StockPerformance | undefined> {
+  try {
+    const fromDate = new Date();
+    fromDate.setFullYear(fromDate.getFullYear() - 4);
+    const response = await fetch(`https://api.nasdaq.com/api/quote/${symbol}/historical?assetclass=stocks&fromdate=${fromDate.toISOString().slice(0, 10)}&limit=5000`, {
+      headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' },
+      cache: 'no-store',
+    });
+    if (!response.ok) return undefined;
+    const payload = await response.json() as { data?: { tradesTable?: { rows?: Array<{ date?: string; close?: string }> } } };
+    const points = (payload.data?.tradesTable?.rows ?? []).map((row) => {
+      const close = Number(row.close?.replace(/[^0-9.-]/g, ''));
+      const [month, day, year] = row.date?.split('/') ?? [];
+      return { date: new Date(`${year}-${month}-${day}T00:00:00`), close };
+    }).filter((point): point is { date: Date; close: number } => Number.isFinite(point.close))
+      .sort((a, b) => a.date.getTime() - b.date.getTime());
+    if (!points.length) return undefined;
+    const latest = points.at(-1)!;
+    const getReturn = (date: Date) => {
+      const prior = [...points].reverse().find((point) => point.date <= date);
+      return prior ? Number(((latest.close / prior.close - 1) * 100).toFixed(2)) : null;
+    };
+    return {
+      oneYear: getReturn(shiftedDate(latest.date, 1)),
+      yearToDate: getReturn(new Date(latest.date.getFullYear(), 0, 1)),
+      threeYear: getReturn(shiftedDate(latest.date, 3)),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 export async function GET() {
   const sources: string[] = [];
   const [quoteResult, statusResult] = await Promise.allSettled([tencentQuotes(), eastmoneyFundStatus()]);
@@ -138,6 +195,17 @@ export async function GET() {
   if (navResults.some((item) => item.nav)) sources.push('东方财富基金历史净值接口');
   const performances = await mapWithConcurrency(etfCodes, performance);
   if (performances.some(Boolean)) sources.push('天天基金单位净值走势接口（收益计算）');
+  const [stockQuoteResult, stockPerformances] = await Promise.allSettled([
+    usStockQuotes(),
+    mapWithConcurrency(usStockSymbols, usStockPerformance, 4),
+  ]);
+  const stocks = usStockSymbols.map((symbol, index) => ({
+    symbol,
+    ...(stockQuoteResult.status === 'fulfilled' ? stockQuoteResult.value[symbol] : {}),
+    performance: stockPerformances.status === 'fulfilled' ? stockPerformances.value[index] : undefined,
+  }));
+  if (stockQuoteResult.status === 'fulfilled') sources.push('腾讯财经美股行情接口');
+  if (stockPerformances.status === 'fulfilled' && stockPerformances.value.some(Boolean)) sources.push('Nasdaq 官方历史日线（收益计算）');
 
   const output = universe.map((fund) => {
     const quote = quotes[fund.code];
@@ -153,5 +221,5 @@ export async function GET() {
       performance: fund.type === '场内ETF' ? performances[etfCodes.indexOf(fund.code)] : undefined,
     };
   });
-  return Response.json({ generatedAt: new Date().toISOString(), mode: 'live', sources, funds: output, notes: ['净值溢价率 =（最新价 - 最新披露单位净值）/ 最新披露单位净值。', '申购状态、单日限额、净值和净值日期随页面刷新请求上游数据。'] }, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
+  return Response.json({ generatedAt: new Date().toISOString(), mode: 'live', sources, funds: output, stocks, notes: ['净值溢价率 =（最新价 - 最新披露单位净值）/ 最新披露单位净值。', '申购状态、单日限额、净值和净值日期随页面刷新请求上游数据。'] }, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
 }
