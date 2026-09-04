@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { BarChart3, RefreshCw } from 'lucide-react';
+import { ArrowDown, BarChart3, RefreshCw } from 'lucide-react';
 import universe from '@/data/fund_universe.json';
 
 type Performance = {
@@ -35,7 +35,20 @@ type Snapshot = {
   stocks: Stock[];
   sources?: string[];
 };
+type SortKey = 'marketChange' | 'premium' | 'oneYear' | 'yearToDate' | 'threeYear' | 'previousClose' | 'marketPrice' | 'nav' | 'date';
+type SortState = { key: SortKey; direction: 'asc' | 'desc' };
+type Column = { label: string; key?: SortKey };
 const initial: Snapshot = { generatedAt: null, funds: universe, stocks: [] };
+const etfColumns: Column[] = [
+  { label: '基金名称 / 代码' }, { label: '涨跌幅', key: 'marketChange' }, { label: '净值溢价率', key: 'premium' },
+  { label: '近一年收益', key: 'oneYear' }, { label: '今年收益', key: 'yearToDate' }, { label: '近3年收益', key: 'threeYear' },
+  { label: '昨收', key: 'previousClose' }, { label: '最新价', key: 'marketPrice' }, { label: '最新披露单位净值', key: 'nav' }, { label: '净值日期', key: 'date' },
+];
+const stockColumns: Column[] = [
+  { label: '标的代码' }, { label: '涨跌幅', key: 'marketChange' }, { label: '今年收益', key: 'yearToDate' },
+  { label: '近一年收益', key: 'oneYear' }, { label: '近3年收益', key: 'threeYear' }, { label: '昨收', key: 'previousClose' },
+  { label: '最新价', key: 'marketPrice' }, { label: '日期', key: 'date' },
+];
 const statusClass: Record<string, string> = {
   限大额: 'bg-amber-50 text-amber-700 border-amber-200',
   限制大额申购: 'bg-amber-50 text-amber-700 border-amber-200',
@@ -46,6 +59,8 @@ const statusClass: Record<string, string> = {
 export default function Home() {
   const [snapshot, setSnapshot] = useState<Snapshot>(initial);
   const [loading, setLoading] = useState(false);
+  const [etfSort, setEtfSort] = useState<SortState>({ key: 'yearToDate', direction: 'desc' });
+  const [stockSort, setStockSort] = useState<SortState>({ key: 'yearToDate', direction: 'desc' });
   async function refresh() {
     setLoading(true);
     try {
@@ -58,11 +73,13 @@ export default function Home() {
   useEffect(() => {
     void refresh();
   }, []);
-  const etfs = snapshot.funds
-    .filter((f) => f.type === '场内ETF')
-    .sort((a, b) => (b.premium ?? -Infinity) - (a.premium ?? -Infinity));
+  const etfs = sortRecords(
+    snapshot.funds.filter((f) => f.type === '场内ETF'),
+    etfSort,
+    (fund, key) => getFundValue(fund, key),
+  );
   const offMarket = snapshot.funds.filter((f) => f.type !== '场内ETF');
-  const stocks = [...snapshot.stocks].sort((a, b) => (b.performance?.oneYear ?? -Infinity) - (a.performance?.oneYear ?? -Infinity));
+  const stocks = sortRecords(snapshot.stocks, stockSort, (stock, key) => getStockValue(stock, key));
   return (
     <main className="min-h-screen bg-[#f4f7f8]">
       <header className="hero-grid text-white">
@@ -89,14 +106,14 @@ export default function Home() {
           </button>
         </div>
       </header>
-      <div className="mx-auto max-w-7xl px-5 py-10 sm:px-8 lg:px-10">
+      <div className="mx-auto flex max-w-7xl flex-col px-5 py-10 sm:px-8 lg:px-10">
         <p className="mb-8 text-sm text-slate-500">
           {snapshot.generatedAt
             ? `数据请求时间：${new Date(snapshot.generatedAt).toLocaleString('zh-CN', { hour12: false })}`
             : '正在请求实时数据'}
           　·　微信端可左右滑动，第一列固定
         </p>
-        <section>
+        <section className="order-1">
           <p className="section-kicker">ETF PREMIUM</p>
           <h2 className="section-title">场内纳指 ETF 溢价率排行</h2>
           <p className="mt-2 text-sm text-slate-500">
@@ -107,24 +124,14 @@ export default function Home() {
               <table className="w-full min-w-[1060px] text-left text-sm">
                 <thead className="bg-[#eaf0f5] text-xs text-slate-500">
                   <tr>
-                    {[
-                      '基金名称 / 代码',
-                      '涨跌幅',
-                      '净值溢价率',
-                      '近一年收益',
-                      '今年收益',
-                      '近3年收益',
-                      '昨收',
-                      '最新价',
-                      '最新披露单位净值',
-                      '净值日期',
-                    ].map((x, i) => (
-                      <th
-                        key={x}
-                        className={`px-5 py-3.5 font-medium ${i === 0 ? 'sticky left-0 z-20 bg-[#eaf0f5] shadow-[4px_0_8px_-6px_rgba(16,42,67,.35)]' : ''}`}
-                      >
-                        {x}
-                      </th>
+                    {etfColumns.map((column, i) => (
+                      <SortableHeader
+                        key={column.label}
+                        column={column}
+                        first={i === 0}
+                        sort={etfSort}
+                        onSort={(key) => setEtfSort(toggleSort(etfSort, key))}
+                      />
                     ))}
                   </tr>
                 </thead>
@@ -157,7 +164,7 @@ export default function Home() {
             </div>
           </div>
         </section>
-        <section className="mt-14">
+        <section className="order-3 mt-14">
           <p className="section-kicker">US MEGA-CAP TECH</p>
           <h2 className="section-title">美国大型科技巨头收益排行对比</h2>
           <p className="mt-2 text-sm text-slate-500">
@@ -168,13 +175,14 @@ export default function Home() {
               <table className="w-full min-w-[940px] text-left text-sm">
                 <thead className="bg-[#eaf0f5] text-xs text-slate-500">
                   <tr>
-                    {['标的代码', '涨跌幅', '今年收益', '近一年收益', '近3年收益', '昨收', '最新价', '日期'].map((x, i) => (
-                      <th
-                        key={x}
-                        className={`px-5 py-3.5 font-medium ${i === 0 ? 'sticky left-0 z-20 bg-[#eaf0f5] shadow-[4px_0_8px_-6px_rgba(16,42,67,.35)]' : ''}`}
-                      >
-                        {x}
-                      </th>
+                    {stockColumns.map((column, i) => (
+                      <SortableHeader
+                        key={column.label}
+                        column={column}
+                        first={i === 0}
+                        sort={stockSort}
+                        onSort={(key) => setStockSort(toggleSort(stockSort, key))}
+                      />
                     ))}
                   </tr>
                 </thead>
@@ -201,7 +209,7 @@ export default function Home() {
             </div>
           </div>
         </section>
-        <section className="mt-14">
+        <section className="order-2 mt-14">
           <p className="section-kicker">PURCHASE STATUS & COST</p>
           <h2 className="section-title">场外基金申购状态与费率对比</h2>
           <p className="mt-2 text-sm text-slate-500">
@@ -268,11 +276,79 @@ export default function Home() {
             </div>
           </div>
         </section>
-        <footer className="mt-12 border-t border-slate-200 pt-5 text-xs text-slate-400">
+        <footer className="order-4 mt-12 border-t border-slate-200 pt-5 text-xs text-slate-400">
           数据仅供信息参考，基金投资有风险。
         </footer>
       </div>
     </main>
+  );
+}
+function toggleSort(current: SortState, key: SortKey): SortState {
+  return current.key === key
+    ? { key, direction: current.direction === 'desc' ? 'asc' : 'desc' }
+    : { key, direction: 'desc' };
+}
+
+function sortRecords<T>(records: T[], sort: SortState, getValue: (record: T, key: SortKey) => number | string | null | undefined) {
+  return [...records].sort((left, right) => {
+    const a = getValue(left, sort.key);
+    const b = getValue(right, sort.key);
+    const aMissing = a === undefined || a === null || a === '';
+    const bMissing = b === undefined || b === null || b === '';
+    if (aMissing || bMissing) return aMissing === bMissing ? 0 : aMissing ? 1 : -1;
+    const compared = typeof a === 'number' && typeof b === 'number'
+      ? a - b
+      : String(a).localeCompare(String(b), 'zh-CN');
+    return sort.direction === 'desc' ? -compared : compared;
+  });
+}
+
+function getFundValue(fund: Fund, key: SortKey) {
+  const values: Record<SortKey, number | string | null | undefined> = {
+    marketChange: fund.marketChange,
+    premium: fund.premium,
+    oneYear: fund.performance?.oneYear,
+    yearToDate: fund.performance?.yearToDate,
+    threeYear: fund.performance?.threeYear,
+    previousClose: fund.previousClose,
+    marketPrice: fund.marketPrice,
+    nav: fund.nav ? Number(fund.nav) : undefined,
+    date: fund.navDate,
+  };
+  return values[key];
+}
+
+function getStockValue(stock: Stock, key: SortKey) {
+  const values: Record<SortKey, number | string | null | undefined> = {
+    marketChange: stock.marketChange,
+    premium: undefined,
+    oneYear: stock.performance?.oneYear,
+    yearToDate: stock.performance?.yearToDate,
+    threeYear: stock.performance?.threeYear,
+    previousClose: stock.previousClose,
+    marketPrice: stock.marketPrice,
+    nav: undefined,
+    date: stock.quoteTimestamp,
+  };
+  return values[key];
+}
+
+function SortableHeader({ column, first, sort, onSort }: { column: Column; first: boolean; sort: SortState; onSort: (key: SortKey) => void }) {
+  const active = column.key === sort.key;
+  return (
+    <th className={`px-5 py-3.5 font-medium ${first ? 'sticky left-0 z-20 bg-[#eaf0f5] shadow-[4px_0_8px_-6px_rgba(16,42,67,.35)]' : ''}`}>
+      {column.key ? (
+        <button
+          type="button"
+          onClick={() => onSort(column.key!)}
+          className={`inline-flex items-center gap-1 whitespace-nowrap ${active ? 'text-[#0d4a7c]' : 'text-slate-500'}`}
+          aria-label={`按${column.label}排序`}
+        >
+          {column.label}
+          <ArrowDown size={13} className={active && sort.direction === 'asc' ? 'rotate-180' : ''} />
+        </button>
+      ) : column.label}
+    </th>
   );
 }
 function Num({ value, strong = false }: { value?: number; strong?: boolean }) {
