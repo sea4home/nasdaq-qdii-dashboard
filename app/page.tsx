@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { ArrowDown, BarChart3, RefreshCw } from 'lucide-react';
+import { Spinner } from '@/components/ui/spinner';
 import universe from '@/data/fund_universe.json';
 
 type Performance = {
@@ -58,14 +59,19 @@ const statusClass: Record<string, string> = {
 
 export default function Home() {
   const [snapshot, setSnapshot] = useState<Snapshot>(initial);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [etfSort, setEtfSort] = useState<SortState>({ key: 'yearToDate', direction: 'desc' });
   const [stockSort, setStockSort] = useState<SortState>({ key: 'yearToDate', direction: 'desc' });
   async function refresh() {
     setLoading(true);
+    setLoadError(false);
     try {
       const response = await fetch('/api/dashboard', { cache: 'no-store' });
-      if (response.ok) setSnapshot(await response.json());
+      if (!response.ok) throw new Error(`Dashboard request failed: ${response.status}`);
+      setSnapshot(await response.json());
+    } catch {
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -81,9 +87,9 @@ export default function Home() {
   const offMarket = snapshot.funds.filter((f) => f.type !== '场内ETF');
   const stocks = sortRecords(snapshot.stocks, stockSort, (stock, key) => getStockValue(stock, key));
   return (
-    <main className="min-h-screen bg-[#f4f7f8]">
+    <main className="min-h-screen bg-[#f4f7f8]" aria-busy={loading}>
       <header className="hero-grid text-white">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-7 sm:px-8 lg:px-10">
+        <div className="mx-auto flex max-w-7xl flex-col items-stretch gap-5 px-5 py-6 sm:flex-row sm:items-center sm:justify-between sm:px-8 sm:py-7 lg:px-10">
           <div className="flex items-center gap-3">
             <div className="grid h-10 w-10 place-items-center rounded-xl bg-[#49d0bc] text-[#082d54]">
               <BarChart3 size={21} />
@@ -99,14 +105,42 @@ export default function Home() {
           </div>
           <button
             onClick={() => void refresh()}
-            className="flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm"
+            disabled={loading}
+            className="flex min-h-11 items-center justify-center gap-2 rounded-full border border-white/20 bg-white/10 px-5 py-2 text-sm transition hover:bg-white/15 disabled:cursor-wait disabled:opacity-80 sm:min-h-0"
+            aria-label={loading ? '正在刷新数据' : '刷新数据'}
           >
             <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
             {loading ? '更新中' : '刷新数据'}
           </button>
         </div>
       </header>
+      {loading && (
+        <div className="refresh-overlay" role="dialog" aria-modal="true" aria-labelledby="refresh-title" aria-describedby="refresh-description">
+          <div className="refresh-card">
+            <div className="refresh-icon" aria-hidden="true">
+              <Spinner className="h-7 w-7" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p id="refresh-title" className="text-base font-semibold text-slate-900 sm:text-lg">
+                正在刷新最新数据
+              </p>
+              <p id="refresh-description" className="mt-1 text-sm leading-6 text-slate-500">
+                正在请求行情、净值和收益数据，请稍候…
+              </p>
+              <div className="refresh-progress" aria-hidden="true"><span /></div>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="mx-auto flex max-w-7xl flex-col px-5 py-10 sm:px-8 lg:px-10">
+        {loadError && (
+          <div className="mb-7 flex flex-col gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 sm:flex-row sm:items-center sm:justify-between" role="alert">
+            <span>暂时未能获取最新数据，请检查网络后重试。</span>
+            <button type="button" onClick={() => void refresh()} className="min-h-10 rounded-full bg-amber-900 px-4 font-medium text-white sm:min-h-0 sm:py-2">
+              重新刷新
+            </button>
+          </div>
+        )}
         <p className="mb-8 text-sm text-slate-500">
           {snapshot.generatedAt
             ? `数据请求时间：${new Date(snapshot.generatedAt).toLocaleString('zh-CN', { hour12: false })}`
