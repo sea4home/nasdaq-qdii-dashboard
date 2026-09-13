@@ -8,6 +8,8 @@ type StockPerformance = { oneYear?: number | null; yearToDate?: number | null; t
 const etfCodes = universe.filter((fund) => fund.type === '场内ETF').map((fund) => fund.code);
 const usStockSymbols = ['NVDA', 'MSFT', 'AAPL', 'GOOGL', 'AMZN', 'META', 'TSLA', 'SPCX', 'TSM', 'AVGO', 'AMD', 'SNDK'];
 const headers = { 'User-Agent': 'Mozilla/5.0', Referer: 'https://fund.eastmoney.com/' };
+const upstreamFetch = (input: string | URL, init?: RequestInit) =>
+  fetch(input, { ...init, signal: AbortSignal.timeout(5_000) });
 
 function numberAt(values: string[], index: number) {
   const value = Number(values[index]);
@@ -16,7 +18,7 @@ function numberAt(values: string[], index: number) {
 
 async function tencentQuotes(): Promise<Record<string, MarketQuote>> {
   const symbols = etfCodes.map((code) => `${code.startsWith('15') ? 'sz' : 'sh'}${code}`).join(',');
-  const response = await fetch(`https://qt.gtimg.cn/q=${symbols}`, { headers, cache: 'no-store' });
+  const response = await upstreamFetch(`https://qt.gtimg.cn/q=${symbols}`, { headers, cache: 'no-store' });
   if (!response.ok) throw new Error(`Tencent quote ${response.status}`);
   const text = new TextDecoder('gb18030').decode(await response.arrayBuffer());
   const quotes: Record<string, MarketQuote> = {};
@@ -39,7 +41,7 @@ async function tencentQuotes(): Promise<Record<string, MarketQuote>> {
 async function eastmoneyQuoteFallback(codes: string[]): Promise<Record<string, MarketQuote>> {
   if (!codes.length) return {};
   const secids = codes.map((code) => `${code.startsWith('15') ? '0' : '1'}.${code}`).join(',');
-  const response = await fetch(`https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&invt=2&fields=f2,f3,f12,f18,f124&secids=${secids}`, { headers, cache: 'no-store' });
+  const response = await upstreamFetch(`https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&invt=2&fields=f2,f3,f12,f18,f124&secids=${secids}`, { headers, cache: 'no-store' });
   if (!response.ok) return {};
   const payload = await response.json() as { data?: { diff?: Array<Record<string, number | string>> } };
   return Object.fromEntries(((payload.data?.diff) ?? []).map((row) => [String(row.f12), {
@@ -59,10 +61,10 @@ function formatLimit(value: string) {
 }
 
 async function eastmoneyFundStatus(): Promise<Record<string, FundStatus>> {
-  const response = await fetch('https://fund.eastmoney.com/Data/Fund_JJJZ_Data.aspx?t=8&page=1,50000&js=reData&sort=fcode,asc', { headers, cache: 'no-store' });
+  const response = await upstreamFetch('https://fund.eastmoney.com/Data/Fund_JJJZ_Data.aspx?t=8&page=1,50000&js=reData&sort=fcode,asc', { headers, cache: 'no-store' });
   if (!response.ok) throw new Error(`Eastmoney status ${response.status}`);
   const text = await response.text();
-  const match = text.match(/datas:(\[.*\]),record:/s);
+  const match = text.match(/datas:(\[[\s\S]*\]),record:/);
   if (!match) throw new Error('Eastmoney status payload changed');
   const rows = JSON.parse(match[1]) as string[][];
   const expectedCodes = new Set(universe.map((fund) => fund.code));
@@ -80,7 +82,7 @@ async function eastmoneyFundStatus(): Promise<Record<string, FundStatus>> {
 }
 
 async function latestNav(code: string): Promise<FundStatus> {
-  const response = await fetch(`https://api.fund.eastmoney.com/f10/lsjz?fundCode=${code}&pageIndex=1&pageSize=1`, { headers, cache: 'no-store' });
+  const response = await upstreamFetch(`https://api.fund.eastmoney.com/f10/lsjz?fundCode=${code}&pageIndex=1&pageSize=1`, { headers, cache: 'no-store' });
   if (!response.ok) return {};
   const payload = await response.json() as { Data?: { LSJZList?: Array<{ DWJZ?: string; FSRQ?: string; SGZT?: string }> } };
   const row = payload.Data?.LSJZList?.[0];
@@ -88,7 +90,7 @@ async function latestNav(code: string): Promise<FundStatus> {
 }
 
 async function mapWithConcurrency<T, R>(items: T[], worker: (item: T) => Promise<R>, limit = 5) {
-  const result: R[] = new Array(items.length);
+  const result: R[] = Array.from({ length: items.length });
   let cursor = 0;
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
     while (cursor < items.length) {
@@ -106,10 +108,10 @@ function shiftedDate(value: Date, years: number) {
 }
 
 async function performance(code: string) {
-  const response = await fetch(`https://fund.eastmoney.com/pingzhongdata/${code}.js?v=${Date.now()}`, { headers, cache: 'no-store' });
+  const response = await upstreamFetch(`https://fund.eastmoney.com/pingzhongdata/${code}.js?v=${Date.now()}`, { headers, cache: 'no-store' });
   if (!response.ok) return undefined;
   const text = await response.text();
-  const match = text.match(/var Data_netWorthTrend\s*=\s*(\[.*?\]);/s);
+  const match = text.match(/var Data_netWorthTrend\s*=\s*(\[[\s\S]*?\]);/);
   if (!match) return undefined;
   const rows = JSON.parse(match[1]) as Array<{ x: number; y: number }>;
   const points = rows.filter((row) => Number.isFinite(row.x) && Number.isFinite(row.y));
@@ -124,7 +126,7 @@ async function performance(code: string) {
 }
 
 async function usStockQuotes(): Promise<Record<string, StockQuote>> {
-  const response = await fetch(`https://qt.gtimg.cn/q=${usStockSymbols.map((symbol) => `us${symbol}`).join(',')}`, { headers, cache: 'no-store' });
+  const response = await upstreamFetch(`https://qt.gtimg.cn/q=${usStockSymbols.map((symbol) => `us${symbol}`).join(',')}`, { headers, cache: 'no-store' });
   if (!response.ok) throw new Error(`Tencent US quote ${response.status}`);
   const text = new TextDecoder('gb18030').decode(await response.arrayBuffer());
   const quotes: Record<string, StockQuote> = {};
@@ -149,7 +151,7 @@ async function usStockPerformance(symbol: string): Promise<StockPerformance | un
   try {
     const fromDate = new Date();
     fromDate.setFullYear(fromDate.getFullYear() - 4);
-    const response = await fetch(`https://api.nasdaq.com/api/quote/${symbol}/historical?assetclass=stocks&fromdate=${fromDate.toISOString().slice(0, 10)}&limit=5000`, {
+    const response = await upstreamFetch(`https://api.nasdaq.com/api/quote/${symbol}/historical?assetclass=stocks&fromdate=${fromDate.toISOString().slice(0, 10)}&limit=5000`, {
       headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' },
       cache: 'no-store',
     });
@@ -184,28 +186,39 @@ export async function GET() {
   if (quoteResult.status === 'fulfilled') sources.push('腾讯财经 ETF 行情（市价、昨收、IOPV）');
   const missingPrices = etfCodes.filter((code) => !quotes[code]?.marketPrice);
   if (missingPrices.length) {
-    const fallback = await eastmoneyQuoteFallback(missingPrices);
-    quotes = { ...fallback, ...quotes };
-    if (Object.keys(fallback).length) sources.push('东方财富 ETF 行情（市价降级）');
+    try {
+      const fallback = await eastmoneyQuoteFallback(missingPrices);
+      quotes = { ...fallback, ...quotes };
+      if (Object.keys(fallback).length) sources.push('东方财富 ETF 行情（市价降级）');
+    } catch {
+      // Keep the rest of the dashboard usable when a fallback provider times out.
+    }
   }
   const statuses = statusResult.status === 'fulfilled' ? statusResult.value : {};
   if (statusResult.status === 'fulfilled') sources.push('天天基金申购状态与净值接口');
-  const navResults = await mapWithConcurrency(universe.map((fund) => fund.code), latestNav);
-  const navs = Object.fromEntries(universe.map((fund, index) => [fund.code, navResults[index]]));
-  if (navResults.some((item) => item.nav)) sources.push('东方财富基金历史净值接口');
-  const performances = await mapWithConcurrency(etfCodes, performance);
-  if (performances.some(Boolean)) sources.push('天天基金单位净值走势接口（收益计算）');
-  const [stockQuoteResult, stockPerformances] = await Promise.allSettled([
-    usStockQuotes(),
+  const [navResults, performances, stockQuoteResult, stockPerformances] = await Promise.all([
+    mapWithConcurrency(universe.map((fund) => fund.code), async (code) => {
+      try { return await latestNav(code); } catch { return {}; }
+    }),
+    mapWithConcurrency(etfCodes, async (code) => {
+      try { return await performance(code); } catch { return undefined; }
+    }),
+    Promise.resolve(usStockQuotes()).then(
+      (value) => ({ status: 'fulfilled' as const, value }),
+      (reason) => ({ status: 'rejected' as const, reason }),
+    ),
     mapWithConcurrency(usStockSymbols, usStockPerformance, 4),
   ]);
+  const navs = Object.fromEntries(universe.map((fund, index) => [fund.code, navResults[index]]));
+  if (navResults.some((item) => item.nav)) sources.push('东方财富基金历史净值接口');
+  if (performances.some(Boolean)) sources.push('天天基金单位净值走势接口（收益计算）');
   const stocks = usStockSymbols.map((symbol, index) => ({
     symbol,
     ...(stockQuoteResult.status === 'fulfilled' ? stockQuoteResult.value[symbol] : {}),
-    performance: stockPerformances.status === 'fulfilled' ? stockPerformances.value[index] : undefined,
+    performance: stockPerformances[index],
   }));
   if (stockQuoteResult.status === 'fulfilled') sources.push('腾讯财经美股行情接口');
-  if (stockPerformances.status === 'fulfilled' && stockPerformances.value.some(Boolean)) sources.push('Nasdaq 官方历史日线（收益计算）');
+  if (stockPerformances.some(Boolean)) sources.push('Nasdaq 官方历史日线（收益计算）');
 
   const output = universe.map((fund) => {
     const quote = quotes[fund.code];

@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { ArrowDown, BarChart3, RefreshCw } from 'lucide-react';
 import { Spinner } from '@/components/ui/spinner';
+import { DrawdownBacktest } from '@/components/drawdown-backtest';
 import universe from '@/data/fund_universe.json';
 
 type Performance = {
@@ -310,7 +311,10 @@ export default function Home() {
             </div>
           </div>
         </section>
-        <footer className="order-4 mt-12 border-t border-slate-200 pt-5 text-xs text-slate-400">
+        <div className="order-4">
+          <DrawdownBacktest />
+        </div>
+        <footer className="order-5 mt-12 border-t border-slate-200 pt-5 text-xs text-slate-400">
           数据仅供信息参考，基金投资有风险。
         </footer>
       </div>
