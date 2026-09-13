@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   BarChart3,
@@ -78,8 +78,16 @@ const barColors: Record<HorizonKey, string> = {
   oneYear: '#55eef0',
 };
 
-async function requestBacktest(symbol: 'NDX' | 'COMP', years: number, peakDays: number) {
-  const response = await fetch(`/api/backtest?symbol=${symbol}&years=${years}&peakDays=${peakDays}`);
+type RunParameters = { symbol: 'NDX' | 'COMP'; years: number; peakDays: number };
+
+async function requestBacktest(
+  { symbol, years, peakDays }: RunParameters,
+  signal?: AbortSignal,
+) {
+  const response = await fetch(`/api/backtest?symbol=${symbol}&years=${years}&peakDays=${peakDays}`, {
+    cache: 'no-store',
+    signal,
+  });
   const payload = (await response.json()) as BacktestResult & { error?: string };
   if (!response.ok) throw new Error(payload.error || `回测请求失败（${response.status}）`);
   return payload;
@@ -115,33 +123,77 @@ export function DrawdownBacktest() {
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [completion, setCompletion] = useState<{ id: number; text: string } | null>(null);
+  const requestSequence = useRef(0);
+  const activeRequest = useRef<AbortController | null>(null);
+  const selectedParameters = useRef<RunParameters>({ symbol: 'NDX', years: 10, peakDays: 252 });
 
-  const runBacktest = useCallback(async () => {
+  const executeBacktest = useCallback(async (parameters: RunParameters, announce: boolean) => {
+    const requestId = ++requestSequence.current;
+    activeRequest.current?.abort();
+    const controller = new AbortController();
+    activeRequest.current = controller;
+    const startedAt = performance.now();
     setLoading(true);
     setError('');
+    if (announce) setCompletion(null);
     try {
-      setResult(await requestBacktest(symbol, years, peakDays));
+      const [payload] = await Promise.all([
+        requestBacktest(parameters, controller.signal),
+        new Promise((resolve) => setTimeout(resolve, 700)),
+      ]);
+      if (requestId !== requestSequence.current) return;
+      setResult(payload);
+      if (announce) {
+        const elapsed = Math.max(0.7, (performance.now() - startedAt) / 1000).toFixed(1);
+        setCompletion({
+          id: Date.now(),
+          text: `回测完成 · ${payload.symbolName} · 近${payload.years}年 · 数据截至 ${payload.dataAsOf} · 用时 ${elapsed} 秒`,
+        });
+      }
     } catch (caught) {
+      if (caught instanceof DOMException && caught.name === 'AbortError') return;
+      if (requestId !== requestSequence.current) return;
       setError(caught instanceof Error ? caught.message : '暂时无法获取回测数据');
     } finally {
-      setLoading(false);
+      if (requestId === requestSequence.current) {
+        setLoading(false);
+        if (activeRequest.current === controller) activeRequest.current = null;
+      }
     }
-  }, [peakDays, symbol, years]);
+  }, []);
+
+  const runBacktest = useCallback(() => {
+    void executeBacktest({ ...selectedParameters.current }, true);
+  }, [executeBacktest]);
+
+  const changeSymbol = (nextSymbol: 'NDX' | 'COMP') => {
+    selectedParameters.current.symbol = nextSymbol;
+    setSymbol(nextSymbol);
+  };
+  const changeYears = (nextYears: number) => {
+    const safeYears = Math.min(25, Math.max(3, nextYears || 10));
+    selectedParameters.current.years = safeYears;
+    setYears(safeYears);
+  };
+  const changePeakDays = (nextPeakDays: number) => {
+    selectedParameters.current.peakDays = nextPeakDays;
+    setPeakDays(nextPeakDays);
+  };
 
   useEffect(() => {
-    let active = true;
-    void requestBacktest('NDX', 10, 252)
-      .then((payload) => {
-        if (active) setResult(payload);
-      })
-      .catch((caught: unknown) => {
-        if (active) setError(caught instanceof Error ? caught.message : '暂时无法获取回测数据');
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    return () => { active = false; };
-  }, []);
+    const timer = window.setTimeout(() => {
+      void executeBacktest({ symbol: 'NDX', years: 10, peakDays: 252 }, false);
+    }, 0);
+    return () => {
+      window.clearTimeout(timer);
+      activeRequest.current?.abort();
+    };
+  }, [executeBacktest]);
+
+  const parametersChanged = Boolean(
+    result && (result.symbol !== symbol || result.years !== years || result.peakDays !== peakDays),
+  );
 
   const focusStat = result?.stats.find((row) => row.threshold === focusThreshold) ?? null;
   const focusEvents = result?.events[String(focusThreshold)] ?? [];
@@ -192,7 +244,7 @@ export function DrawdownBacktest() {
       <div className="bt-controls" aria-label="回测参数">
         <label>
           <span>标的</span>
-          <select value={symbol} onChange={(event) => setSymbol(event.target.value as 'NDX' | 'COMP')}>
+          <select value={symbol} disabled={loading} onChange={(event) => changeSymbol(event.target.value as 'NDX' | 'COMP')}>
             <option value="NDX">纳斯达克100</option>
             <option value="COMP">纳斯达克综合</option>
           </select>
@@ -206,20 +258,21 @@ export function DrawdownBacktest() {
               max={25}
               inputMode="numeric"
               value={years}
-              onChange={(event) => setYears(Math.min(25, Math.max(3, Number(event.target.value) || 10)))}
+              disabled={loading}
+              onChange={(event) => changeYears(Number(event.target.value))}
             />
             年
           </span>
         </label>
         <label>
           <span>阶段高点</span>
-          <select value={peakDays} onChange={(event) => setPeakDays(Number(event.target.value))}>
+          <select value={peakDays} disabled={loading} onChange={(event) => changePeakDays(Number(event.target.value))}>
             <option value={126}>近126交易日最高收盘价</option>
             <option value={252}>近252交易日最高收盘价</option>
             <option value={756}>近756交易日最高收盘价</option>
           </select>
         </label>
-        <button className="bt-run" type="button" onClick={() => void runBacktest()} disabled={loading}>
+        <button className="bt-run" type="button" onClick={runBacktest} disabled={loading}>
           {loading ? <Spinner className="h-4 w-4" /> : <Play size={16} fill="currentColor" />}
           {loading ? '计算中' : '运行回测'}
         </button>
@@ -233,6 +286,8 @@ export function DrawdownBacktest() {
               key={threshold}
               type="button"
               className={focusThreshold === threshold ? 'active' : ''}
+              aria-pressed={focusThreshold === threshold}
+              disabled={loading}
               onClick={() => setFocusThreshold(threshold)}
             >
               {threshold}%
@@ -246,6 +301,8 @@ export function DrawdownBacktest() {
               key={key}
               type="button"
               className={focusHorizon === key ? 'active' : ''}
+              aria-pressed={focusHorizon === key}
+              disabled={loading}
               onClick={() => setFocusHorizon(key)}
             >
               {horizonLabels[key]}
@@ -254,12 +311,24 @@ export function DrawdownBacktest() {
         </div>
       </div>
 
+      {!loading && (
+        <output
+          key={parametersChanged ? 'pending' : completion?.id ?? 'ready'}
+          className={`bt-run-status ${parametersChanged ? 'pending' : 'complete'}`}
+          aria-live="polite"
+        >
+          {parametersChanged
+            ? '参数已修改，点击“运行回测”应用新的标的、年限或阶段高点。'
+            : completion?.text ?? (result ? `当前结果已就绪 · ${result.symbolName} · 近${result.years}年` : '')}
+        </output>
+      )}
+
       <p className="bt-method"><Info size={15} />首次跌破阈值触发 · 次一交易日开盘买入 · 创出新的阶段高点后重新计数</p>
 
       {error && (
         <div className="bt-error" role="alert">
           <span>回测数据暂时未能加载：{error}</span>
-          <button type="button" onClick={() => void runBacktest()}>重新计算</button>
+          <button type="button" onClick={runBacktest}>重新计算</button>
         </div>
       )}
 

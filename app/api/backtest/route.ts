@@ -37,7 +37,9 @@ const nasdaqHeaders = {
 const historyCache = new Map<string, { expiresAt: number; points: PricePoint[] }>();
 
 function finiteNumber(value: string | undefined) {
-  const parsed = Number(value?.replace(/[^0-9.-]/g, ''));
+  const normalized = value?.replace(/[^0-9.-]/g, '').trim();
+  if (!normalized || normalized === '-' || normalized === '.' || normalized === '-.') return null;
+  const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : null;
 }
 
@@ -89,12 +91,15 @@ async function fetchNasdaqHistory(symbol: 'NDX' | 'COMP', fromDate: string) {
       const date = isoNasdaqDate(row.date);
       const close = finiteNumber(row.close);
       if (!date || close === null || close <= 0) return null;
+      const open = finiteNumber(row.open);
+      const high = finiteNumber(row.high);
+      const low = finiteNumber(row.low);
       return {
         date,
         close,
-        open: finiteNumber(row.open) ?? close,
-        high: finiteNumber(row.high) ?? close,
-        low: finiteNumber(row.low) ?? close,
+        open: open !== null && open > 0 ? open : close,
+        high: high !== null && high > 0 ? high : close,
+        low: low !== null && low > 0 ? low : close,
       };
     })
     .filter((point): point is PricePoint => point !== null)
@@ -129,7 +134,7 @@ function summarize(values: Array<number | null>) {
   };
 }
 
-function buildEvents(points: PricePoint[], startDate: string, peakDays: number) {
+export function buildEvents(points: PricePoint[], startDate: string, peakDays: number) {
   const events = new Map<number, BacktestEvent[]>();
   const armed = new Map<number, boolean>();
   THRESHOLDS.forEach((threshold) => {
@@ -147,10 +152,14 @@ function buildEvents(points: PricePoint[], startDate: string, peakDays: number) 
     const drawdown = (points[index].close / peak.close - 1) * 100;
 
     if (peakIndex === index) THRESHOLDS.forEach((threshold) => armed.set(threshold, true));
-    if (points[index].date < startDate || index + 1 >= points.length) continue;
 
     for (const threshold of THRESHOLDS) {
       if (!armed.get(threshold) || drawdown > -threshold) continue;
+      // Carry threshold state across the reporting boundary. If the selected
+      // period begins in the middle of an existing drawdown, that drawdown is
+      // already in progress and must not be counted as a new trigger.
+      armed.set(threshold, false);
+      if (points[index].date < startDate || index + 1 >= points.length) continue;
       const entryIndex = index + 1;
       const entry = points[entryIndex];
       const entryPrice = entry.open > 0 ? entry.open : entry.close;
@@ -180,7 +189,6 @@ function buildEvents(points: PricePoint[], startDate: string, peakDays: number) 
         maxAdverse: Number.isFinite(worst) ? round(worst) : null,
         path,
       });
-      armed.set(threshold, false);
     }
   }
   return events;
