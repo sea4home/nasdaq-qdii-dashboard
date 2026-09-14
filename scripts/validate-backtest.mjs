@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { buildEvents } from '../app/api/backtest/route.ts';
+import { buildEvents } from '../lib/backtest-engine.ts';
 
 const SYMBOLS = ['NDX', 'COMP'];
 const YEARS = Array.from({ length: 23 }, (_, index) => index + 3);

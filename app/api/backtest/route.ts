@@ -1,40 +1,11 @@
-type PricePoint = {
-  date: string;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-};
-
-type HorizonKey = 'oneMonth' | 'threeMonths' | 'sixMonths' | 'oneYear';
-
-type BacktestEvent = {
-  id: string;
-  triggerDate: string;
-  entryDate: string;
-  threshold: number;
-  drawdown: number;
-  peakDate: string;
-  peakClose: number;
-  entryPrice: number;
-  returns: Record<HorizonKey, number | null>;
-  maxAdverse: number | null;
-  path: number[];
-};
-
-const THRESHOLDS = [5, 8, 10, 15, 20, 25, 30] as const;
-const HORIZONS: Array<{ key: HorizonKey; label: string; days: number }> = [
-  { key: 'oneMonth', label: '1个月', days: 21 },
-  { key: 'threeMonths', label: '3个月', days: 63 },
-  { key: 'sixMonths', label: '6个月', days: 126 },
-  { key: 'oneYear', label: '1年', days: 252 },
-];
+import { chinaDay, oncePerIsolate, readCache, writeCache } from '@/lib/daily-cache';
+import { buildEvents, HORIZONS, round, THRESHOLDS, type BacktestEvent, type PricePoint } from '@/lib/backtest-engine';
 const nasdaqHeaders = {
   Accept: 'application/json, text/plain, */*',
   'User-Agent': 'Mozilla/5.0',
   Referer: 'https://www.nasdaq.com/market-activity/index/ndx/historical',
 };
-const historyCache = new Map<string, { expiresAt: number; points: PricePoint[] }>();
+const historyCache = new Map<string, { day: string; updatedAt: string; points: PricePoint[] }>();
 
 function finiteNumber(value: string | undefined) {
   const normalized = value?.replace(/[^0-9.-]/g, '').trim();
@@ -55,11 +26,8 @@ function yearsAgo(years: number) {
   return date.toISOString().slice(0, 10);
 }
 
-async function fetchNasdaqHistory(symbol: 'NDX' | 'COMP', fromDate: string) {
-  const cacheKey = `${symbol}:${fromDate}`;
-  const cached = historyCache.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now()) return cached.points;
-
+async function fetchNasdaqHistoryFromSource(symbol: 'NDX' | 'COMP') {
+  const fromDate = yearsAgo(29);
   const rows: Array<Record<string, string>> = [];
   let offset = 0;
   let total = Infinity;
@@ -106,12 +74,40 @@ async function fetchNasdaqHistory(symbol: 'NDX' | 'COMP', fromDate: string) {
     .sort((left, right) => left.date.localeCompare(right.date));
 
   if (points.length < 260) throw new Error('Not enough Nasdaq historical observations');
-  historyCache.set(cacheKey, { expiresAt: Date.now() + 6 * 60 * 60 * 1000, points });
   return points;
 }
 
-function round(value: number) {
-  return Number(value.toFixed(2));
+async function loadNasdaqHistory(symbol: 'NDX' | 'COMP') {
+  const day = chinaDay();
+  const cacheKey = `nasdaq-history:${symbol}`;
+  const memory = historyCache.get(cacheKey);
+  if (memory?.day === day) return { ...memory, status: 'hit' as const };
+
+  const cached = await readCache<PricePoint[]>(cacheKey, day);
+  if (cached) {
+    historyCache.set(cacheKey, { day: cached.day, updatedAt: cached.updatedAt, points: cached.value });
+    return { day: cached.day, updatedAt: cached.updatedAt, points: cached.value, status: 'hit' as const };
+  }
+
+  return oncePerIsolate(`${cacheKey}:${day}`, async () => {
+    const secondRead = await readCache<PricePoint[]>(cacheKey, day);
+    if (secondRead) {
+      historyCache.set(cacheKey, { day: secondRead.day, updatedAt: secondRead.updatedAt, points: secondRead.value });
+      return { day: secondRead.day, updatedAt: secondRead.updatedAt, points: secondRead.value, status: 'hit' as const };
+    }
+    try {
+      const points = await fetchNasdaqHistoryFromSource(symbol);
+      const stored = await writeCache(cacheKey, day, points);
+      const updatedAt = stored?.updatedAt ?? new Date().toISOString();
+      historyCache.set(cacheKey, { day, updatedAt, points });
+      return { day, updatedAt, points, status: stored ? 'updated' as const : 'unavailable' as const };
+    } catch (error) {
+      const stale = await readCache<PricePoint[]>(cacheKey);
+      if (!stale) throw error;
+      historyCache.set(cacheKey, { day: stale.day, updatedAt: stale.updatedAt, points: stale.value });
+      return { day: stale.day, updatedAt: stale.updatedAt, points: stale.value, status: 'stale' as const };
+    }
+  });
 }
 
 function quantile(values: number[], q: number) {
@@ -132,66 +128,6 @@ function summarize(values: Array<number | null>) {
     winRate: complete.length ? round((complete.filter((value) => value > 0).length / complete.length) * 100) : null,
     count: complete.length,
   };
-}
-
-export function buildEvents(points: PricePoint[], startDate: string, peakDays: number) {
-  const events = new Map<number, BacktestEvent[]>();
-  const armed = new Map<number, boolean>();
-  THRESHOLDS.forEach((threshold) => {
-    events.set(threshold, []);
-    armed.set(threshold, true);
-  });
-
-  const peakDeque: number[] = [];
-  for (let index = 0; index < points.length; index++) {
-    while (peakDeque.length && peakDeque[0] < index - peakDays + 1) peakDeque.shift();
-    while (peakDeque.length && points[peakDeque.at(-1)!].close <= points[index].close) peakDeque.pop();
-    peakDeque.push(index);
-    const peakIndex = peakDeque[0];
-    const peak = points[peakIndex];
-    const drawdown = (points[index].close / peak.close - 1) * 100;
-
-    if (peakIndex === index) THRESHOLDS.forEach((threshold) => armed.set(threshold, true));
-
-    for (const threshold of THRESHOLDS) {
-      if (!armed.get(threshold) || drawdown > -threshold) continue;
-      // Carry threshold state across the reporting boundary. If the selected
-      // period begins in the middle of an existing drawdown, that drawdown is
-      // already in progress and must not be counted as a new trigger.
-      armed.set(threshold, false);
-      if (points[index].date < startDate || index + 1 >= points.length) continue;
-      const entryIndex = index + 1;
-      const entry = points[entryIndex];
-      const entryPrice = entry.open > 0 ? entry.open : entry.close;
-      const futureReturns = Object.fromEntries(
-        HORIZONS.map(({ key, days }) => {
-          const future = points[entryIndex + days];
-          return [key, future ? round((future.close / entryPrice - 1) * 100) : null];
-        }),
-      ) as Record<HorizonKey, number | null>;
-      const endIndex = Math.min(points.length - 1, entryIndex + 252);
-      let worst = Infinity;
-      const path: number[] = [];
-      for (let cursor = entryIndex; cursor <= endIndex; cursor++) {
-        path.push(round((points[cursor].close / entryPrice - 1) * 100));
-        worst = Math.min(worst, (points[cursor].low / entryPrice - 1) * 100);
-      }
-      events.get(threshold)!.push({
-        id: `${threshold}-${points[index].date}`,
-        triggerDate: points[index].date,
-        entryDate: entry.date,
-        threshold,
-        drawdown: round(drawdown),
-        peakDate: peak.date,
-        peakClose: round(peak.close),
-        entryPrice: round(entryPrice),
-        returns: futureReturns,
-        maxAdverse: Number.isFinite(worst) ? round(worst) : null,
-        path,
-      });
-    }
-  }
-  return events;
 }
 
 function buildPathGroup(events: BacktestEvent[]) {
@@ -218,8 +154,8 @@ export async function GET(request: Request) {
     const symbol = params.get('symbol') === 'COMP' ? 'COMP' : 'NDX';
     const years = Math.min(25, Math.max(3, Number(params.get('years')) || 10));
     const peakDays = [126, 252, 756].includes(Number(params.get('peakDays'))) ? Number(params.get('peakDays')) : 252;
-    const fetchYears = years + Math.ceil(peakDays / 252) + 1;
-    const points = await fetchNasdaqHistory(symbol, yearsAgo(fetchYears));
+    const history = await loadNasdaqHistory(symbol);
+    const points = history.points;
     const requestedStart = yearsAgo(years);
     const availableStart = points.find((point) => point.date >= requestedStart)?.date ?? points[0].date;
     const groupedEvents = buildEvents(points, availableStart, peakDays);
@@ -259,8 +195,9 @@ export async function GET(request: Request) {
         events,
         methodology: '首次跌破阈值触发；次一交易日开盘买入；创出新的阶段高点后重新计数；持有期按交易日计算。',
         source: 'Nasdaq 官方历史日线',
+        cache: { day: history.day, updatedAt: history.updatedAt, status: history.status },
       },
-      { headers: { 'Cache-Control': 'public, max-age=300, s-maxage=21600' } },
+      { headers: { 'Cache-Control': 'public, max-age=60, s-maxage=300, stale-while-revalidate=86400' } },
     );
   } catch (error) {
     return Response.json(

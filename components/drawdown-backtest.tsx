@@ -56,6 +56,7 @@ type BacktestResult = {
   events: Record<string, BacktestEvent[]>;
   methodology: string;
   source: string;
+  cache?: { day: string; updatedAt: string; status: 'hit' | 'updated' | 'stale' | 'unavailable' };
 };
 
 const horizonLabels: Record<HorizonKey, string> = {
@@ -85,7 +86,6 @@ async function requestBacktest(
   signal?: AbortSignal,
 ) {
   const response = await fetch(`/api/backtest?symbol=${symbol}&years=${years}&peakDays=${peakDays}`, {
-    cache: 'no-store',
     signal,
   });
   const payload = (await response.json()) as BacktestResult & { error?: string };
@@ -139,14 +139,11 @@ export function DrawdownBacktest() {
     setError('');
     if (announce) setCompletion(null);
     try {
-      const [payload] = await Promise.all([
-        requestBacktest(parameters, controller.signal),
-        new Promise((resolve) => setTimeout(resolve, 700)),
-      ]);
+      const payload = await requestBacktest(parameters, controller.signal);
       if (requestId !== requestSequence.current) return;
       setResult(payload);
       if (announce) {
-        const elapsed = Math.max(0.7, (performance.now() - startedAt) / 1000).toFixed(1);
+        const elapsed = Math.max(0.1, (performance.now() - startedAt) / 1000).toFixed(1);
         setCompletion({
           id: Date.now(),
           text: `回测完成 · ${payload.symbolName} · 近${payload.years}年 · 数据截至 ${payload.dataAsOf} · 用时 ${elapsed} 秒`,
@@ -426,14 +423,14 @@ export function DrawdownBacktest() {
           </table>
         </div>
         <div className="bt-footnote">
-          <span>数据源：{result?.source ?? 'Nasdaq 官方历史日线'} · 数据截至 {result?.dataAsOf ?? '--'}</span>
+          <span>数据源：{result?.source ?? 'Nasdaq 官方历史日线'} · 数据截至 {result?.dataAsOf ?? '--'}{result?.cache ? ' · 每日缓存' : ''}</span>
           <span>收益未计交易费用、税费与汇率影响，仅供研究参考</span>
         </div>
       </div>
 
       {loading && (
         <output className="bt-loading" aria-live="polite">
-          <div><Spinner className="h-6 w-6" /><strong>正在计算历史回撤收益</strong><span>正在读取 Nasdaq 日线并生成多周期统计…</span></div>
+          <div><Spinner className="h-6 w-6" /><strong>正在读取回测结果</strong><span>优先使用今日缓存；如尚未更新，将自动读取 Nasdaq 日线…</span></div>
         </output>
       )}
     </section>

@@ -1,4 +1,5 @@
 import universe from '@/data/fund_universe.json';
+import { chinaDay, oncePerIsolate, readCache, writeCache } from '@/lib/daily-cache';
 
 type MarketQuote = { marketPrice?: number; marketChange?: number; previousClose?: number; quoteTimestamp?: string };
 type FundStatus = { nav?: string; navDate?: string; purchaseStatus?: string; dailyLimit?: string };
@@ -179,9 +180,26 @@ async function usStockPerformance(symbol: string): Promise<StockPerformance | un
   }
 }
 
-export async function GET() {
+async function buildDashboardSnapshot() {
   const sources: string[] = [];
-  const [quoteResult, statusResult] = await Promise.allSettled([tencentQuotes(), eastmoneyFundStatus()]);
+  const [quoteResult, statusResult, performances, stockQuoteResult, stockPerformances] = await Promise.all([
+    Promise.resolve(tencentQuotes()).then(
+      (value) => ({ status: 'fulfilled' as const, value }),
+      (reason) => ({ status: 'rejected' as const, reason }),
+    ),
+    Promise.resolve(eastmoneyFundStatus()).then(
+      (value) => ({ status: 'fulfilled' as const, value }),
+      (reason) => ({ status: 'rejected' as const, reason }),
+    ),
+    mapWithConcurrency(etfCodes, async (code) => {
+      try { return await performance(code); } catch { return undefined; }
+    }, etfCodes.length),
+    Promise.resolve(usStockQuotes()).then(
+      (value) => ({ status: 'fulfilled' as const, value }),
+      (reason) => ({ status: 'rejected' as const, reason }),
+    ),
+    mapWithConcurrency(usStockSymbols, usStockPerformance, usStockSymbols.length),
+  ]);
   let quotes = quoteResult.status === 'fulfilled' ? quoteResult.value : {};
   if (quoteResult.status === 'fulfilled') sources.push('腾讯财经 ETF 行情（市价、昨收、IOPV）');
   const missingPrices = etfCodes.filter((code) => !quotes[code]?.marketPrice);
@@ -196,19 +214,10 @@ export async function GET() {
   }
   const statuses = statusResult.status === 'fulfilled' ? statusResult.value : {};
   if (statusResult.status === 'fulfilled') sources.push('天天基金申购状态与净值接口');
-  const [navResults, performances, stockQuoteResult, stockPerformances] = await Promise.all([
-    mapWithConcurrency(universe.map((fund) => fund.code), async (code) => {
-      try { return await latestNav(code); } catch { return {}; }
-    }),
-    mapWithConcurrency(etfCodes, async (code) => {
-      try { return await performance(code); } catch { return undefined; }
-    }),
-    Promise.resolve(usStockQuotes()).then(
-      (value) => ({ status: 'fulfilled' as const, value }),
-      (reason) => ({ status: 'rejected' as const, reason }),
-    ),
-    mapWithConcurrency(usStockSymbols, usStockPerformance, 4),
-  ]);
+  const navResults = await mapWithConcurrency(universe.map((fund) => fund.code), async (code) => {
+    if (statuses[code]?.nav) return {};
+    try { return await latestNav(code); } catch { return {}; }
+  }, 10);
   const navs = Object.fromEntries(universe.map((fund, index) => [fund.code, navResults[index]]));
   if (navResults.some((item) => item.nav)) sources.push('东方财富基金历史净值接口');
   if (performances.some(Boolean)) sources.push('天天基金单位净值走势接口（收益计算）');
@@ -222,7 +231,7 @@ export async function GET() {
 
   const output = universe.map((fund) => {
     const quote = quotes[fund.code];
-    const disclosedNav = navs[fund.code]?.nav;
+    const disclosedNav = statuses[fund.code]?.nav ?? navs[fund.code]?.nav;
     const premium = quote?.marketPrice && disclosedNav ? Number((((quote.marketPrice - Number(disclosedNav)) / Number(disclosedNav)) * 100).toFixed(2)) : null;
     return {
       ...fund,
@@ -234,5 +243,60 @@ export async function GET() {
       performance: fund.type === '场内ETF' ? performances[etfCodes.indexOf(fund.code)] : undefined,
     };
   });
-  return Response.json({ generatedAt: new Date().toISOString(), mode: 'live', sources, funds: output, stocks, notes: ['净值溢价率 =（最新价 - 最新披露单位净值）/ 最新披露单位净值。', '申购状态、单日限额、净值和净值日期随页面刷新请求上游数据。'] }, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
+  const pricedEtfs = output.filter((fund) => fund.type === '场内ETF' && fund.marketPrice).length;
+  const fundsWithNav = output.filter((fund) => fund.nav).length;
+  const pricedStocks = stocks.filter((stock) => stock.marketPrice).length;
+  if (pricedEtfs < Math.ceil(etfCodes.length / 2) || fundsWithNav < Math.ceil(universe.length / 2) || pricedStocks < Math.ceil(usStockSymbols.length / 2)) {
+    throw new Error('Upstream market data coverage is insufficient');
+  }
+  return {
+    generatedAt: new Date().toISOString(),
+    mode: 'daily',
+    sources,
+    funds: output,
+    stocks,
+    notes: [
+      '净值溢价率 =（最新价 - 最新披露单位净值）/ 最新披露单位净值。',
+      '行情、净值和收益数据每日首次访问时更新，当天后续访问直接读取站点缓存。',
+    ],
+  };
+}
+
+type DashboardSnapshot = Awaited<ReturnType<typeof buildDashboardSnapshot>>;
+
+export async function GET() {
+  const day = chinaDay();
+  const cached = await readCache<DashboardSnapshot>('dashboard', day);
+  if (cached) {
+    return Response.json(
+      { ...cached.value, cache: { day: cached.day, updatedAt: cached.updatedAt, status: 'hit' } },
+      { headers: { 'Cache-Control': 'public, max-age=60, s-maxage=300, stale-while-revalidate=86400' } },
+    );
+  }
+
+  try {
+    const snapshot = await oncePerIsolate(`dashboard:${day}`, async () => {
+      const secondRead = await readCache<DashboardSnapshot>('dashboard', day);
+      if (secondRead) return { value: secondRead.value, updatedAt: secondRead.updatedAt, status: 'hit' as const };
+      const value = await buildDashboardSnapshot();
+      const stored = await writeCache('dashboard', day, value);
+      return { value, updatedAt: stored?.updatedAt ?? value.generatedAt, status: stored ? 'updated' as const : 'unavailable' as const };
+    });
+    return Response.json(
+      { ...snapshot.value, cache: { day, updatedAt: snapshot.updatedAt, status: snapshot.status } },
+      { headers: { 'Cache-Control': 'public, max-age=60, s-maxage=300, stale-while-revalidate=86400' } },
+    );
+  } catch (error) {
+    const stale = await readCache<DashboardSnapshot>('dashboard');
+    if (stale) {
+      return Response.json(
+        { ...stale.value, cache: { day: stale.day, updatedAt: stale.updatedAt, status: 'stale' } },
+        { headers: { 'Cache-Control': 'public, max-age=60, s-maxage=300' } },
+      );
+    }
+    return Response.json(
+      { error: error instanceof Error ? error.message : 'Dashboard data unavailable' },
+      { status: 502, headers: { 'Cache-Control': 'no-store' } },
+    );
+  }
 }

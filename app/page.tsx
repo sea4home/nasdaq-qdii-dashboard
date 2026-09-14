@@ -36,6 +36,7 @@ type Snapshot = {
   funds: Fund[];
   stocks: Stock[];
   sources?: string[];
+  cache?: { day: string; updatedAt: string; status: 'hit' | 'updated' | 'stale' | 'unavailable' };
 };
 type SortKey = 'marketChange' | 'premium' | 'oneYear' | 'yearToDate' | 'threeYear' | 'previousClose' | 'marketPrice' | 'nav' | 'date';
 type SortState = { key: SortKey; direction: 'asc' | 'desc' };
@@ -68,7 +69,7 @@ export default function Home() {
     setLoading(true);
     setLoadError(false);
     try {
-      const response = await fetch('/api/dashboard', { cache: 'no-store' });
+      const response = await fetch('/api/dashboard');
       if (!response.ok) throw new Error(`Dashboard request failed: ${response.status}`);
       setSnapshot(await response.json());
     } catch {
@@ -108,10 +109,10 @@ export default function Home() {
             onClick={() => void refresh()}
             disabled={loading}
             className="flex min-h-11 items-center justify-center gap-2 rounded-full border border-white/20 bg-white/10 px-5 py-2 text-sm transition hover:bg-white/15 disabled:cursor-wait disabled:opacity-80 sm:min-h-0"
-            aria-label={loading ? '正在刷新数据' : '刷新数据'}
+            aria-label={loading ? '正在读取今日数据' : '读取今日数据'}
           >
             <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
-            {loading ? '更新中' : '刷新数据'}
+            {loading ? '读取中' : '读取今日数据'}
           </button>
         </div>
       </header>
@@ -123,10 +124,10 @@ export default function Home() {
             </div>
             <div className="min-w-0 flex-1">
               <p id="refresh-title" className="text-base font-semibold text-slate-900 sm:text-lg">
-                正在刷新最新数据
+                正在读取今日数据
               </p>
               <p id="refresh-description" className="mt-1 text-sm leading-6 text-slate-500">
-                正在请求行情、净值和收益数据，请稍候…
+                优先读取今日缓存；如今天尚未更新，将自动更新一次行情、净值和收益数据…
               </p>
               <div className="refresh-progress" aria-hidden="true"><span /></div>
             </div>
@@ -138,14 +139,14 @@ export default function Home() {
           <div className="mb-7 flex flex-col gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 sm:flex-row sm:items-center sm:justify-between" role="alert">
             <span>暂时未能获取最新数据，请检查网络后重试。</span>
             <button type="button" onClick={() => void refresh()} className="min-h-10 rounded-full bg-amber-900 px-4 font-medium text-white sm:min-h-0 sm:py-2">
-              重新刷新
+              重新读取
             </button>
           </div>
         )}
         <p className="mb-8 text-sm text-slate-500">
           {snapshot.generatedAt
-            ? `数据请求时间：${new Date(snapshot.generatedAt).toLocaleString('zh-CN', { hour12: false })}`
-            : '正在请求实时数据'}
+            ? `数据更新时间：${new Date(snapshot.generatedAt).toLocaleString('zh-CN', { hour12: false })}${snapshot.cache?.status === 'stale' ? '（上次可用缓存）' : '（今日缓存）'}`
+            : '正在读取今日缓存'}
           　·　微信端可左右滑动，第一列固定
         </p>
         <section className="order-1">
