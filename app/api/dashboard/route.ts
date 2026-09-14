@@ -1,5 +1,5 @@
 import universe from '@/data/fund_universe.json';
-import { chinaDay, oncePerIsolate, readCache, writeCache } from '@/lib/daily-cache';
+import { chinaCacheSlot, oncePerIsolate, readCache, writeCache } from '@/lib/daily-cache';
 
 type MarketQuote = { marketPrice?: number; marketChange?: number; previousClose?: number; quoteTimestamp?: string };
 type FundStatus = { nav?: string; navDate?: string; purchaseStatus?: string; dailyLimit?: string };
@@ -257,16 +257,17 @@ async function buildDashboardSnapshot() {
     stocks,
     notes: [
       '净值溢价率 =（最新价 - 最新披露单位净值）/ 最新披露单位净值。',
-      '行情、净值和收益数据每日首次访问时更新，当天后续访问直接读取站点缓存。',
+      '行情、净值和收益数据每日定时更新三次，其余访问直接读取站点缓存。',
     ],
   };
 }
 
 type DashboardSnapshot = Awaited<ReturnType<typeof buildDashboardSnapshot>>;
 
-export async function GET() {
-  const day = chinaDay();
-  const cached = await readCache<DashboardSnapshot>('dashboard', day);
+export async function GET(request: Request) {
+  const warmNext = new URL(request.url).searchParams.get('warm') === 'next';
+  const slot = chinaCacheSlot(new Date(), warmNext);
+  const cached = await readCache<DashboardSnapshot>('dashboard', slot);
   if (cached) {
     return Response.json(
       { ...cached.value, cache: { day: cached.day, updatedAt: cached.updatedAt, status: 'hit' } },
@@ -275,15 +276,15 @@ export async function GET() {
   }
 
   try {
-    const snapshot = await oncePerIsolate(`dashboard:${day}`, async () => {
-      const secondRead = await readCache<DashboardSnapshot>('dashboard', day);
+    const snapshot = await oncePerIsolate(`dashboard:${slot}`, async () => {
+      const secondRead = await readCache<DashboardSnapshot>('dashboard', slot);
       if (secondRead) return { value: secondRead.value, updatedAt: secondRead.updatedAt, status: 'hit' as const };
       const value = await buildDashboardSnapshot();
-      const stored = await writeCache('dashboard', day, value);
+      const stored = await writeCache('dashboard', slot, value);
       return { value, updatedAt: stored?.updatedAt ?? value.generatedAt, status: stored ? 'updated' as const : 'unavailable' as const };
     });
     return Response.json(
-      { ...snapshot.value, cache: { day, updatedAt: snapshot.updatedAt, status: snapshot.status } },
+      { ...snapshot.value, cache: { day: slot, updatedAt: snapshot.updatedAt, status: snapshot.status } },
       { headers: { 'Cache-Control': 'public, max-age=60, s-maxage=300, stale-while-revalidate=86400' } },
     );
   } catch (error) {

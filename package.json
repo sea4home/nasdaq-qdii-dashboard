@@ -11,6 +11,7 @@
     "start": "wrangler dev --config dist/server/wrangler.json",
     "db:generate": "drizzle-kit generate",
     "test:backtest": "node --experimental-strip-types scripts/validate-backtest.mjs",
+    "test:cache-slots": "node --experimental-strip-types scripts/validate-cache-slots.mjs",
     "lint": "oxlint",
     "format": "oxfmt"
   },

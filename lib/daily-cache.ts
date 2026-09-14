@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:workers';
+export { chinaCacheSlot, chinaDay } from '@/lib/cache-slot';
 
 export type CacheMetadata = {
   day: string;
@@ -13,15 +14,6 @@ type CacheRow = {
 };
 
 const pending = new Map<string, Promise<unknown>>();
-
-export function chinaDay(date = new Date()) {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(date);
-}
 
 function database() {
   return (env as unknown as { DB?: D1Database }).DB;

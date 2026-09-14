@@ -145,7 +145,7 @@ export default function Home() {
         )}
         <p className="mb-8 text-sm text-slate-500">
           {snapshot.generatedAt
-            ? `数据更新时间：${new Date(snapshot.generatedAt).toLocaleString('zh-CN', { hour12: false })}${snapshot.cache?.status === 'stale' ? '（上次可用缓存）' : '（今日缓存）'}`
+            ? `数据更新时间：${new Date(snapshot.generatedAt).toLocaleString('zh-CN', { hour12: false })}${snapshot.cache?.status === 'stale' ? '（上次可用缓存）' : '（定时缓存）'}`
             : '正在读取今日缓存'}
           　·　微信端可左右滑动，第一列固定
         </p>

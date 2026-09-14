@@ -1,0 +1,52 @@
+name: Prewarm Sites data
+
+on:
+  schedule:
+    # 05:50, 11:50 and 17:50 Asia/Shanghai (UTC+8).
+    - cron: '50 21,3,9 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: sites-data-prewarm
+  cancel-in-progress: false
+
+jobs:
+  prewarm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Generate the next dashboard cache
+        run: >-
+          curl --fail-with-body --silent --show-error
+          --retry 3 --retry-delay 5 --max-time 90
+          "https://nasdaq-qdii-dashboard.sea4home.chatgpt.site/api/dashboard?warm=next&run=${{ github.run_id }}"
+          --output dashboard.json
+
+      - name: Validate dashboard data
+        run: >-
+          node -e "const d=require('./dashboard.json');
+          if(d.funds?.length!==33||d.stocks?.length!==12||!d.generatedAt)
+          throw new Error('Dashboard cache validation failed');
+          console.log('Dashboard cache ready:',d.generatedAt,d.cache?.day)"
+
+      - name: Prewarm Nasdaq 100 history
+        run: >-
+          curl --fail-with-body --silent --show-error
+          --retry 3 --retry-delay 5 --max-time 90
+          "https://nasdaq-qdii-dashboard.sea4home.chatgpt.site/api/backtest?symbol=NDX&years=10&peakDays=252&run=${{ github.run_id }}"
+          --output ndx.json
+
+      - name: Prewarm Nasdaq Composite history
+        run: >-
+          curl --fail-with-body --silent --show-error
+          --retry 3 --retry-delay 5 --max-time 90
+          "https://nasdaq-qdii-dashboard.sea4home.chatgpt.site/api/backtest?symbol=COMP&years=10&peakDays=252&run=${{ github.run_id }}"
+          --output comp.json
+
+      - name: Validate backtest caches
+        run: >-
+          node -e "for(const f of ['ndx.json','comp.json']){
+          const d=require('./'+f);
+          if(d.stats?.length!==7||!d.dataAsOf||!d.cache?.day)
+          throw new Error(f+' validation failed');}
+          console.log('Both backtest caches are ready')"
