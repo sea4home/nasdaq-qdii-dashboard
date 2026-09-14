@@ -115,7 +115,7 @@ function heatStyle(value: number | null, metric: MetricKey) {
 
 export function DrawdownBacktest() {
   const [symbol, setSymbol] = useState<'NDX' | 'COMP'>('NDX');
-  const [years, setYears] = useState(10);
+  const [yearsInput, setYearsInput] = useState('10');
   const [peakDays, setPeakDays] = useState(252);
   const [focusThreshold, setFocusThreshold] = useState(10);
   const [focusHorizon, setFocusHorizon] = useState<HorizonKey>('oneYear');
@@ -127,6 +127,7 @@ export function DrawdownBacktest() {
   const requestSequence = useRef(0);
   const activeRequest = useRef<AbortController | null>(null);
   const selectedParameters = useRef<RunParameters>({ symbol: 'NDX', years: 10, peakDays: 252 });
+  const yearsInputRef = useRef('10');
 
   const executeBacktest = useCallback(async (parameters: RunParameters, announce: boolean) => {
     const requestId = ++requestSequence.current;
@@ -171,10 +172,24 @@ export function DrawdownBacktest() {
     selectedParameters.current.symbol = nextSymbol;
     setSymbol(nextSymbol);
   };
-  const changeYears = (nextYears: number) => {
-    const safeYears = Math.min(25, Math.max(3, nextYears || 10));
+  const changeYears = (nextValue: string) => {
+    yearsInputRef.current = nextValue;
+    setYearsInput(nextValue);
+    const parsed = Number(nextValue);
+    if (/^\d+$/.test(nextValue) && Number.isInteger(parsed) && parsed >= 3 && parsed <= 25) {
+      selectedParameters.current.years = parsed;
+    }
+  };
+  const normalizeYears = () => {
+    const parsed = Number(yearsInputRef.current);
+    const fallback = selectedParameters.current.years;
+    const safeYears = yearsInputRef.current.trim() && Number.isFinite(parsed)
+      ? Math.min(25, Math.max(3, Math.round(parsed)))
+      : fallback;
+    const normalized = String(safeYears);
+    yearsInputRef.current = normalized;
     selectedParameters.current.years = safeYears;
-    setYears(safeYears);
+    setYearsInput(normalized);
   };
   const changePeakDays = (nextPeakDays: number) => {
     selectedParameters.current.peakDays = nextPeakDays;
@@ -191,8 +206,13 @@ export function DrawdownBacktest() {
     };
   }, [executeBacktest]);
 
+  const parsedYears = Number(yearsInput);
+  const yearsValid = /^\d+$/.test(yearsInput)
+    && Number.isInteger(parsedYears)
+    && parsedYears >= 3
+    && parsedYears <= 25;
   const parametersChanged = Boolean(
-    result && (result.symbol !== symbol || result.years !== years || result.peakDays !== peakDays),
+    result && (result.symbol !== symbol || !yearsValid || result.years !== parsedYears || result.peakDays !== peakDays),
   );
 
   const focusStat = result?.stats.find((row) => row.threshold === focusThreshold) ?? null;
@@ -257,9 +277,11 @@ export function DrawdownBacktest() {
               min={3}
               max={25}
               inputMode="numeric"
-              value={years}
+              value={yearsInput}
+              aria-invalid={!yearsValid}
               disabled={loading}
-              onChange={(event) => changeYears(Number(event.target.value))}
+              onChange={(event) => changeYears(event.target.value)}
+              onBlur={normalizeYears}
             />
             年
           </span>
@@ -272,7 +294,7 @@ export function DrawdownBacktest() {
             <option value={756}>近756交易日最高收盘价</option>
           </select>
         </label>
-        <button className="bt-run" type="button" onClick={runBacktest} disabled={loading}>
+        <button className="bt-run" type="button" onClick={runBacktest} disabled={loading || !yearsValid}>
           {loading ? <Spinner className="h-4 w-4" /> : <Play size={16} fill="currentColor" />}
           {loading ? '计算中' : '运行回测'}
         </button>
@@ -313,11 +335,13 @@ export function DrawdownBacktest() {
 
       {!loading && (
         <output
-          key={parametersChanged ? 'pending' : completion?.id ?? 'ready'}
-          className={`bt-run-status ${parametersChanged ? 'pending' : 'complete'}`}
+          key={!yearsValid ? 'invalid' : parametersChanged ? 'pending' : completion?.id ?? 'ready'}
+          className={`bt-run-status ${!yearsValid ? 'invalid' : parametersChanged ? 'pending' : 'complete'}`}
           aria-live="polite"
         >
-          {parametersChanged
+          {!yearsValid
+            ? '请输入 3–25 之间的整数年限。'
+            : parametersChanged
             ? '参数已修改，点击“运行回测”应用新的标的、年限或阶段高点。'
             : completion?.text ?? (result ? `当前结果已就绪 · ${result.symbolName} · 近${result.years}年` : '')}
         </output>
