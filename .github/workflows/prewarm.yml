@@ -25,9 +25,13 @@ jobs:
       - name: Validate dashboard data
         run: >-
           node -e "const d=require('./dashboard.json');
-          if(d.funds?.length!==33||d.stocks?.length!==12||!d.generatedAt)
+          const off=d.funds?.filter(f=>f.type!=='场内ETF')||[];
+          const etfPerf=d.funds?.filter(f=>f.type==='场内ETF'&&f.performance?.yearToDate!=null).length||0;
+          const stockPerf=d.stocks?.filter(s=>s.performance?.yearToDate!=null&&s.performance?.oneYear!=null).length||0;
+          const limits=off.filter(f=>f.dailyLimit).length;
+          if(d.funds?.length!==33||d.stocks?.length!==12||!d.generatedAt||etfPerf<9||stockPerf<10||limits<18)
           throw new Error('Dashboard cache validation failed');
-          console.log('Dashboard cache ready:',d.generatedAt,d.cache?.day)"
+          console.log('Dashboard cache ready:',d.generatedAt,d.cache?.day,{etfPerf,stockPerf,limits})"
 
       - name: Prewarm Nasdaq 100 history
         run: >-

@@ -1,7 +1,7 @@
 import universe from '@/data/fund_universe.json';
 import { chinaCacheSlot, oncePerIsolate, readCache, writeCache } from '@/lib/daily-cache';
 
-type MarketQuote = { marketPrice?: number; marketChange?: number; previousClose?: number; quoteTimestamp?: string };
+type MarketQuote = { marketPrice?: number; marketChange?: number; previousClose?: number; quoteTimestamp?: string; iopv?: number };
 type FundStatus = { nav?: string; navDate?: string; purchaseStatus?: string; dailyLimit?: string };
 type StockQuote = MarketQuote & { symbol: string; name?: string };
 type StockPerformance = { oneYear?: number | null; yearToDate?: number | null; threeYear?: number | null };
@@ -10,7 +10,21 @@ const etfCodes = universe.filter((fund) => fund.type === '场内ETF').map((fund)
 const usStockSymbols = ['NVDA', 'MSFT', 'AAPL', 'GOOGL', 'AMZN', 'META', 'TSLA', 'SPCX', 'TSM', 'AVGO', 'AMD', 'SNDK'];
 const headers = { 'User-Agent': 'Mozilla/5.0', Referer: 'https://fund.eastmoney.com/' };
 const upstreamFetch = (input: string | URL, init?: RequestInit) =>
-  fetch(input, { ...init, signal: AbortSignal.timeout(5_000) });
+  fetch(input, { ...init, signal: AbortSignal.timeout(8_000) });
+
+async function fetchWithRetry(input: string | URL, init?: RequestInit, attempts = 2) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      const response = await upstreamFetch(input, init);
+      if (response.ok || attempt === attempts - 1) return response;
+      lastError = new Error(`Upstream response ${response.status}`);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('Upstream request failed');
+}
 
 function numberAt(values: string[], index: number) {
   const value = Number(values[index]);
@@ -34,6 +48,7 @@ async function tencentQuotes(): Promise<Record<string, MarketQuote>> {
       previousClose: numberAt(values, 4),
       marketChange: Number.isFinite(Number(values[32])) ? Number(values[32]) : undefined,
       quoteTimestamp: values[30] || undefined,
+      iopv: numberAt(values, 85),
     };
   }
   return quotes;
@@ -62,7 +77,7 @@ function formatLimit(value: string) {
 }
 
 async function eastmoneyFundStatus(): Promise<Record<string, FundStatus>> {
-  const response = await upstreamFetch('https://fund.eastmoney.com/Data/Fund_JJJZ_Data.aspx?t=8&page=1,50000&js=reData&sort=fcode,asc', { headers, cache: 'no-store' });
+  const response = await fetchWithRetry('https://fund.eastmoney.com/Data/Fund_JJJZ_Data.aspx?t=8&page=1,50000&js=reData&sort=fcode,asc', { headers, cache: 'no-store' }, 3);
   if (!response.ok) throw new Error(`Eastmoney status ${response.status}`);
   const text = await response.text();
   const match = text.match(/datas:(\[[\s\S]*\]),record:/);
@@ -150,20 +165,34 @@ async function usStockQuotes(): Promise<Record<string, StockQuote>> {
 
 async function usStockPerformance(symbol: string): Promise<StockPerformance | undefined> {
   try {
-    const fromDate = new Date();
-    fromDate.setFullYear(fromDate.getFullYear() - 4);
-    const response = await upstreamFetch(`https://api.nasdaq.com/api/quote/${symbol}/historical?assetclass=stocks&fromdate=${fromDate.toISOString().slice(0, 10)}&limit=5000`, {
+    const end = Math.floor(Date.now() / 1000) + 86_400;
+    const start = new Date();
+    start.setFullYear(start.getFullYear() - 4);
+    const response = await fetchWithRetry(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?period1=${Math.floor(start.getTime() / 1000)}&period2=${end}&interval=1d&events=history`, {
       headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' },
       cache: 'no-store',
-    });
+    }, 3);
     if (!response.ok) return undefined;
-    const payload = await response.json() as { data?: { tradesTable?: { rows?: Array<{ date?: string; close?: string }> } } };
-    const points = (payload.data?.tradesTable?.rows ?? []).map((row) => {
-      const close = Number(row.close?.replace(/[^0-9.-]/g, ''));
-      const [month, day, year] = row.date?.split('/') ?? [];
-      return { date: new Date(`${year}-${month}-${day}T00:00:00`), close };
-    }).filter((point): point is { date: Date; close: number } => Number.isFinite(point.close))
-      .sort((a, b) => a.date.getTime() - b.date.getTime());
+    const payload = await response.json() as { chart?: { result?: Array<{ timestamp?: number[]; indicators?: { quote?: Array<{ close?: Array<number | null> }> } }> } };
+    const chart = payload.chart?.result?.[0];
+    const timestamps = chart?.timestamp ?? [];
+    const closes = chart?.indicators?.quote?.[0]?.close ?? [];
+    let points = timestamps.map((timestamp, index) => ({ date: new Date(timestamp * 1000), close: closes[index] }))
+      .filter((point): point is { date: Date; close: number } => Number.isFinite(point.close) && Number(point.close) > 0);
+    if (!points.length) {
+      const nasdaqResponse = await fetchWithRetry(`https://api.nasdaq.com/api/quote/${symbol}/historical?assetclass=stocks&fromdate=${start.toISOString().slice(0, 10)}&limit=5000`, {
+        headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' },
+        cache: 'no-store',
+      }, 2);
+      if (!nasdaqResponse.ok) return undefined;
+      const nasdaqPayload = await nasdaqResponse.json() as { data?: { tradesTable?: { rows?: Array<{ date?: string; close?: string }> } } };
+      points = (nasdaqPayload.data?.tradesTable?.rows ?? []).map((row) => {
+        const close = Number(row.close?.replace(/[^0-9.-]/g, ''));
+        const [month, day, year] = row.date?.split('/') ?? [];
+        return { date: new Date(`${year}-${month}-${day}T00:00:00`), close };
+      }).filter((point): point is { date: Date; close: number } => Number.isFinite(point.close) && point.close > 0)
+        .sort((a, b) => a.date.getTime() - b.date.getTime());
+    }
     if (!points.length) return undefined;
     const latest = points.at(-1)!;
     const getReturn = (date: Date) => {
@@ -193,12 +222,12 @@ async function buildDashboardSnapshot() {
     ),
     mapWithConcurrency(etfCodes, async (code) => {
       try { return await performance(code); } catch { return undefined; }
-    }, etfCodes.length),
+    }, 4),
     Promise.resolve(usStockQuotes()).then(
       (value) => ({ status: 'fulfilled' as const, value }),
       (reason) => ({ status: 'rejected' as const, reason }),
     ),
-    mapWithConcurrency(usStockSymbols, usStockPerformance, usStockSymbols.length),
+    mapWithConcurrency(usStockSymbols, usStockPerformance, 4),
   ]);
   let quotes = quoteResult.status === 'fulfilled' ? quoteResult.value : {};
   if (quoteResult.status === 'fulfilled') sources.push('腾讯财经 ETF 行情（市价、昨收、IOPV）');
@@ -227,26 +256,36 @@ async function buildDashboardSnapshot() {
     performance: stockPerformances[index],
   }));
   if (stockQuoteResult.status === 'fulfilled') sources.push('腾讯财经美股行情接口');
-  if (stockPerformances.some(Boolean)) sources.push('Nasdaq 官方历史日线（收益计算）');
+  if (stockPerformances.some(Boolean)) sources.push('Yahoo Finance 历史日线（收益计算）');
 
   const output = universe.map((fund) => {
     const quote = quotes[fund.code];
     const disclosedNav = statuses[fund.code]?.nav ?? navs[fund.code]?.nav;
-    const premium = quote?.marketPrice && disclosedNav ? Number((((quote.marketPrice - Number(disclosedNav)) / Number(disclosedNav)) * 100).toFixed(2)) : null;
+    const validIopv = quote?.iopv && quote.marketPrice && Math.abs(quote.marketPrice / quote.iopv - 1) < 0.25 ? quote.iopv : undefined;
+    const premium = quote?.marketPrice && validIopv ? Number((((quote.marketPrice - validIopv) / validIopv) * 100).toFixed(2)) : null;
     return {
       ...fund,
       ...navs[fund.code],
       ...statuses[fund.code],
       ...quote,
       premium,
-      premiumStatus: disclosedNav ? '最新市价相对最新披露单位净值' : '最新披露单位净值暂不可用，未计算溢价率',
+      premiumStatus: validIopv ? '按实时 IOPV 计算' : 'IOPV 暂不可用，未计算溢价率',
       performance: fund.type === '场内ETF' ? performances[etfCodes.indexOf(fund.code)] : undefined,
     };
   });
   const pricedEtfs = output.filter((fund) => fund.type === '场内ETF' && fund.marketPrice).length;
   const fundsWithNav = output.filter((fund) => fund.nav).length;
   const pricedStocks = stocks.filter((stock) => stock.marketPrice).length;
-  if (pricedEtfs < Math.ceil(etfCodes.length / 2) || fundsWithNav < Math.ceil(universe.length / 2) || pricedStocks < Math.ceil(usStockSymbols.length / 2)) {
+  const fundPerformances = output.filter((fund) => fund.type === '场内ETF' && fund.performance?.yearToDate != null).length;
+  const stockPerformanceCount = stocks.filter((stock) => stock.performance?.yearToDate != null && stock.performance?.oneYear != null).length;
+  const offMarketFunds = output.filter((fund) => fund.type !== '场内ETF');
+  const purchaseLimits = offMarketFunds.filter((fund) => fund.dailyLimit).length;
+  if (pricedEtfs < Math.ceil(etfCodes.length / 2)
+    || fundsWithNav < Math.ceil(universe.length / 2)
+    || pricedStocks < Math.ceil(usStockSymbols.length / 2)
+    || fundPerformances < Math.ceil(etfCodes.length * 0.8)
+    || stockPerformanceCount < Math.ceil(usStockSymbols.length * 0.8)
+    || purchaseLimits < Math.ceil(offMarketFunds.length * 0.8)) {
     throw new Error('Upstream market data coverage is insufficient');
   }
   return {
@@ -267,7 +306,8 @@ type DashboardSnapshot = Awaited<ReturnType<typeof buildDashboardSnapshot>>;
 export async function GET(request: Request) {
   const warmNext = new URL(request.url).searchParams.get('warm') === 'next';
   const slot = chinaCacheSlot(new Date(), warmNext);
-  const cached = await readCache<DashboardSnapshot>('dashboard', slot);
+  const cacheKey = 'dashboard-v2';
+  const cached = await readCache<DashboardSnapshot>(cacheKey, slot);
   if (cached) {
     return Response.json(
       { ...cached.value, cache: { day: cached.day, updatedAt: cached.updatedAt, status: 'hit' } },
@@ -277,10 +317,10 @@ export async function GET(request: Request) {
 
   try {
     const snapshot = await oncePerIsolate(`dashboard:${slot}`, async () => {
-      const secondRead = await readCache<DashboardSnapshot>('dashboard', slot);
+      const secondRead = await readCache<DashboardSnapshot>(cacheKey, slot);
       if (secondRead) return { value: secondRead.value, updatedAt: secondRead.updatedAt, status: 'hit' as const };
       const value = await buildDashboardSnapshot();
-      const stored = await writeCache('dashboard', slot, value);
+      const stored = await writeCache(cacheKey, slot, value);
       return { value, updatedAt: stored?.updatedAt ?? value.generatedAt, status: stored ? 'updated' as const : 'unavailable' as const };
     });
     return Response.json(
@@ -288,7 +328,7 @@ export async function GET(request: Request) {
       { headers: { 'Cache-Control': 'public, max-age=60, s-maxage=300, stale-while-revalidate=86400' } },
     );
   } catch (error) {
-    const stale = await readCache<DashboardSnapshot>('dashboard');
+    const stale = await readCache<DashboardSnapshot>(cacheKey);
     if (stale) {
       return Response.json(
         { ...stale.value, cache: { day: stale.day, updatedAt: stale.updatedAt, status: 'stale' } },
