@@ -4,6 +4,16 @@
 
 线上地址：<https://nasdaq-qdii-dashboard.sea4home.chatgpt.site/>
 
+GitHub 仓库：<https://github.com/sea4home/nasdaq-qdii-dashboard>
+
+## GitHub Actions 与 Pages
+
+- GitHub Actions workflow：`Prewarm Sites data`，配置文件位于 `.github/workflows/prewarm.yml`。
+- 当前状态：仍在工作。最近一次定时运行成功，run id 为 `35036917305`，运行时间为 2026-09-15 23:43:15 UTC。
+- 作用范围：定时请求线上 Sites API，提前生成 dashboard 和 Nasdaq 回测缓存；它不是 GitHub Pages 部署 workflow。
+- GitHub Pages：当前未启用。GitHub Pages API 返回 `404 Not Found`，`https://sea4home.github.io/nasdaq-qdii-dashboard/` 当前也返回 404。
+- 当前可访问页面仍以 OpenAI Sites 为准：<https://nasdaq-qdii-dashboard.sea4home.chatgpt.site/>
+
 ## 数据更新
 
 - 北京时间 05:50、11:50、17:50 由 GitHub Actions 提前生成下一时段缓存。
