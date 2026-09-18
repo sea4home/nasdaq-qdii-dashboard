@@ -4,7 +4,14 @@ import { chinaCacheSlot, oncePerIsolate, readCache, writeCache } from '@/lib/dai
 type MarketQuote = { marketPrice?: number; marketChange?: number; previousClose?: number; quoteTimestamp?: string; iopv?: number };
 type FundStatus = { nav?: string; navDate?: string; purchaseStatus?: string; dailyLimit?: string };
 type StockQuote = MarketQuote & { symbol: string; name?: string };
-type StockPerformance = { oneYear?: number | null; yearToDate?: number | null; threeYear?: number | null };
+type StockPerformance = {
+  oneYear?: number | null;
+  yearToDate?: number | null;
+  threeYear?: number | null;
+  yearToDateStatus?: string;
+  oneYearStatus?: string;
+  threeYearStatus?: string;
+};
 
 const etfCodes = universe.filter((fund) => fund.type === '场内ETF').map((fund) => fund.code);
 const usStockSymbols = ['NVDA', 'MSFT', 'AAPL', 'GOOGL', 'AMZN', 'META', 'TSLA', 'SPCX', 'TSM', 'AVGO', 'AMD', 'SNDK'];
@@ -199,10 +206,18 @@ async function usStockPerformance(symbol: string): Promise<StockPerformance | un
       const prior = [...points].reverse().find((point) => point.date <= date);
       return prior ? Number(((latest.close / prior.close - 1) * 100).toFixed(2)) : null;
     };
+    const first = points[0];
+    const yearStart = new Date(latest.date.getFullYear(), 0, 1);
+    const oneYearStart = shiftedDate(latest.date, 1);
+    const threeYearStart = shiftedDate(latest.date, 3);
+    const yearToDate = getReturn(yearStart);
     return {
-      oneYear: getReturn(shiftedDate(latest.date, 1)),
-      yearToDate: getReturn(new Date(latest.date.getFullYear(), 0, 1)),
-      threeYear: getReturn(shiftedDate(latest.date, 3)),
+      oneYear: getReturn(oneYearStart),
+      yearToDate: yearToDate ?? Number(((latest.close / first.close - 1) * 100).toFixed(2)),
+      threeYear: getReturn(threeYearStart),
+      yearToDateStatus: yearToDate == null ? `上市以来（${first.date.toISOString().slice(0, 10)}起）` : undefined,
+      oneYearStatus: first.date > oneYearStart ? '上市未满1年' : undefined,
+      threeYearStatus: first.date > threeYearStart ? '上市未满3年' : undefined,
     };
   } catch {
     return undefined;
@@ -230,7 +245,7 @@ async function buildDashboardSnapshot() {
     mapWithConcurrency(usStockSymbols, usStockPerformance, 4),
   ]);
   let quotes = quoteResult.status === 'fulfilled' ? quoteResult.value : {};
-  if (quoteResult.status === 'fulfilled') sources.push('腾讯财经 ETF 行情（市价、昨收、IOPV）');
+  if (quoteResult.status === 'fulfilled') sources.push('腾讯财经 ETF 行情（市价、昨收）');
   const missingPrices = etfCodes.filter((code) => !quotes[code]?.marketPrice);
   if (missingPrices.length) {
     try {
@@ -261,15 +276,19 @@ async function buildDashboardSnapshot() {
   const output = universe.map((fund) => {
     const quote = quotes[fund.code];
     const disclosedNav = statuses[fund.code]?.nav ?? navs[fund.code]?.nav;
-    const validIopv = quote?.iopv && quote.marketPrice && Math.abs(quote.marketPrice / quote.iopv - 1) < 0.25 ? quote.iopv : undefined;
-    const premium = quote?.marketPrice && validIopv ? Number((((quote.marketPrice - validIopv) / validIopv) * 100).toFixed(2)) : null;
+    const disclosedNavNumber = Number(disclosedNav);
+    const premium = quote?.marketPrice && Number.isFinite(disclosedNavNumber) && disclosedNavNumber > 0
+      ? Number((((quote.marketPrice - disclosedNavNumber) / disclosedNavNumber) * 100).toFixed(2))
+      : null;
     return {
       ...fund,
       ...navs[fund.code],
       ...statuses[fund.code],
       ...quote,
       premium,
-      premiumStatus: validIopv ? '按实时 IOPV 计算' : 'IOPV 暂不可用，未计算溢价率',
+      premiumStatus: premium == null
+        ? '最新价或最新披露单位净值暂不可用'
+        : `按${statuses[fund.code]?.navDate ?? navs[fund.code]?.navDate ?? '最新披露日'}单位净值计算`,
       performance: fund.type === '场内ETF' ? performances[etfCodes.indexOf(fund.code)] : undefined,
     };
   });
@@ -306,7 +325,7 @@ type DashboardSnapshot = Awaited<ReturnType<typeof buildDashboardSnapshot>>;
 export async function GET(request: Request) {
   const warmNext = new URL(request.url).searchParams.get('warm') === 'next';
   const slot = chinaCacheSlot(new Date(), warmNext);
-  const cacheKey = 'dashboard-v2';
+  const cacheKey = 'dashboard-v3';
   const cached = await readCache<DashboardSnapshot>(cacheKey, slot);
   if (cached) {
     return Response.json(
