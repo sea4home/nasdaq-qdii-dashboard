@@ -1,6 +1,6 @@
 # 数据更新
 
-运行 `python scripts/update_data.py` 会读取 `data/fund_universe.json` 中的 33 只基金，并生成 `public/data/latest.json`。
+运行 `python scripts/update_data.py` 会读取 `data/fund_universe.json` 中的 36 只基金，并生成 `public/data/latest.json`。
 
 网页不会在访问者的浏览器中抓取数据。每次成功运行后，页面读取的快照会包含生成时间、最新单位净值、净值日期、申购/赎回状态，以及场内 ETF 的最新市价与净值收益。
 

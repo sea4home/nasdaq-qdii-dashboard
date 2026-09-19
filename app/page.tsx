@@ -9,9 +9,6 @@ type Performance = {
   oneYear?: number | null;
   yearToDate?: number | null;
   threeYear?: number | null;
-  yearToDateStatus?: string;
-  oneYearStatus?: string;
-  threeYearStatus?: string;
 };
 type Fund = (typeof universe)[number] & {
   nav?: string;
@@ -233,9 +230,9 @@ export default function Home() {
                         <p className="text-xs text-slate-400">{stock.name ?? '--'}</p>
                       </td>
                       <Change value={stock.marketChange} />
-                      <Return value={stock.performance?.yearToDate} status={stock.performance?.yearToDateStatus} />
-                      <Return value={stock.performance?.oneYear} status={stock.performance?.oneYearStatus} />
-                      <Return value={stock.performance?.threeYear} status={stock.performance?.threeYearStatus} />
+                      <Return value={stock.performance?.yearToDate} />
+                      <Return value={stock.performance?.oneYear} />
+                      <Return value={stock.performance?.threeYear} />
                       <Num value={stock.previousClose} />
                       <Num value={stock.marketPrice} strong />
                       <td className="px-5 py-3.5 font-mono text-slate-600">
@@ -247,9 +244,6 @@ export default function Home() {
               </table>
             </div>
           </div>
-          <p className="mt-3 text-xs leading-5 text-slate-500">
-            新上市标的的今年收益按首个交易日收盘价起算；历史不足一年或三年时会直接注明，不用“--”掩盖原因。
-          </p>
         </section>
         <section className="order-2 mt-14">
           <p className="section-kicker">PURCHASE STATUS & COST</p>
@@ -428,15 +422,14 @@ function Premium({ value, status }: { value?: number | null; status?: string }) 
     </td>
   );
 }
-function Return({ value, status }: { value?: number | null; status?: string }) {
+function Return({ value }: { value?: number | null }) {
   return (
     <td
       className="px-5 py-3.5 font-mono text-slate-600"
-      title={status}
     >
       {value === undefined || value === null
-        ? status ?? '--'
-        : <><span>{`${value >= 0 ? '+' : ''}${value.toFixed(2)}%`}</span>{status && <span className="mt-0.5 block font-sans text-[11px] text-slate-400">{status}</span>}</>}
+        ? '--'
+        : `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`}
     </td>
   );
 }

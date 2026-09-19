@@ -29,9 +29,11 @@ jobs:
           const etfPerf=d.funds?.filter(f=>f.type==='场内ETF'&&f.performance?.yearToDate!=null).length||0;
           const stockPerf=d.stocks?.filter(s=>s.performance?.yearToDate!=null&&s.performance?.oneYear!=null).length||0;
           const limits=off.filter(f=>f.dailyLimit).length;
-          if(d.funds?.length!==33||d.stocks?.length!==12||!d.generatedAt||etfPerf<9||stockPerf<10||limits<18)
+          const requiredFunds=['017091','017093','019118'];
+          const hasRequiredFunds=requiredFunds.every(code=>d.funds?.some(f=>f.code===code));
+          if(d.funds?.length!==36||d.stocks?.length!==12||!d.generatedAt||!hasRequiredFunds||etfPerf<9||stockPerf<10||limits<20)
           throw new Error('Dashboard cache validation failed');
-          console.log('Dashboard cache ready:',d.generatedAt,d.cache?.day,{etfPerf,stockPerf,limits})"
+          console.log('Dashboard cache ready:',d.generatedAt,d.cache?.day,{etfPerf,stockPerf,limits,hasRequiredFunds})"
 
       - name: Prewarm Nasdaq 100 history
         run: >-
